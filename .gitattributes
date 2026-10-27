@@ -1,0 +1,3 @@
+* text=auto eol=lf
+vendor/broadcom-wps/*.py -text -whitespace
+vendor/broadcom-wps/*.md -text -whitespace

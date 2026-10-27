@@ -1,0 +1,11 @@
+.venv/
+__pycache__/
+*.py[cod]
+.ruff_cache/
+.pytest_cache/
+reports/
+*.pcap
+*.pcapng
+.env
+config/profile.json
+*.log

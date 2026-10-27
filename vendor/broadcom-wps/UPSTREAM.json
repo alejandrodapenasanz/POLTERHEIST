@@ -1,0 +1,11 @@
+{
+  "author": "Quentin Kaiser",
+  "commit": "3cb3ef77d6b71e8441a51668c7e2b919608180f9",
+  "files": {
+    "LICENSE.md": "5e5ce438c17baf8cbfb9c9396506d2e36b6bed04bb661854bbd5aba4606dceb0",
+    "README.md": "541652a4a8985f27df125cf5f1b3f15318dfef763d0ae25174154fa607a0140b",
+    "broadcom_fingerprint.py": "bf7ceacad22721603123ffb6753fbff52e248d6fe9ea023fb0d6e02de1782bfd"
+  },
+  "license": "MIT",
+  "repository": "https://github.com/qkaiser/broadcom-wps"
+}

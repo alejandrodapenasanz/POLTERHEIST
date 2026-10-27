@@ -1,0 +1,2 @@
+# Python >= 3.11. Solo necesario para monitor/PCAP y el detector WPS.
+scapy==2.7.0

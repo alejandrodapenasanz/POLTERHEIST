@@ -40,7 +40,27 @@ py -m venv .venv
 .\.venv\Scripts\python.exe script.py --wpscan
 ```
 
-`--wpscan` y `--wireless` abren directamente WIRELESS RECON; también puedes usar la opción `[2]` del menú. Aquí `wpscan` se refiere a WPS de Wi-Fi.
+`--wpscan`, `--wireless` y `--fingerprint` abren directamente WIRELESS RECON y la selección de objetivo para evaluar WPS; también puedes usar la opción `[2]` del menú. Aquí `wpscan` se refiere a WPS de Wi-Fi.
+
+### Comprobar vulnerabilidad con el fingerprint
+
+```powershell
+.\.venv\Scripts\python.exe script.py --fingerprint
+```
+
+Selecciona la interfaz, el **ID de una red** en la tabla y la interfaz monitor preparada. Confirma el SSID/BSSID escribiendo `AUTORIZO <BSSID>`. La pantalla **WPS FINGERPRINT** muestra el resultado del detector oficial para ese objetivo:
+
+| Veredicto visible | Significado |
+| --- | --- |
+| **PROBABLEMENTE VULNERABLE** | Fingerprint positivo de la implementación; no confirma RCE. |
+| **NEGATIVO SEGÚN EL DETECTOR** | Respuesta negativa para esta detección concreta; no certifica la seguridad general del AP. |
+| **NO CONCLUYENTE** | No hay evidencia suficiente para decidir. |
+| **NO EVALUADO** | La prueba no se ejecutó: se muestra el motivo y el requisito pendiente. |
+| **ERROR EN LA EVALUACIÓN** | Fallo de ejecución o evidencia que no corresponde al objetivo. |
+
+La pantalla incluye, cuando existen, resultado original, implementación estimada, respuestas observadas, estado del objetivo y advertencias del detector. Se guarda en `reports/wireless/<scan_id>/fingerprint.json` y se incorpora a `report.json`. Los archivos originales `upstream_result.json` y PCAP se conservan. Un positivo o negativo requiere una salida original del detector correspondiente al SSID/BSSID elegido; el fabricante, la presencia de WPS o la seguridad WPA no bastan.
+
+Si falta Npcap en Windows, aparece **NO EVALUADO** con las instrucciones necesarias. Añadir el comando no sustituye los requisitos de captura/inyección que se detallan a continuación.
 
 El listado utiliza la **API Native Wi-Fi de Windows** (`wlanapi.dll`). Obtiene BSSID, SSID, frecuencia/canal, RSSI en dBm, calidad y elementos de información WPS/RSN/WPA proporcionados por el controlador. No depende del idioma de `netsh`. WPS solo aparece como `Detected` si existe un anuncio WPS; descubrirlo no significa que el AP sea vulnerable. Se conservan también los bytes originales del listado BSS y los IE.
 
@@ -167,6 +187,7 @@ reports/
   wireless/<fecha_UTC_microsegundos_id>/
     report.json, discovery.json, iw_scan.log o nmcli_scan.log
     windows_bss.bin, windows_discovery.json  # descubrimiento nativo Windows
+    fingerprint.json                   # veredicto, motivo y evidencias del objetivo seleccionado
     discovery_*MHz.pcap y .log          # si se captura en monitor
     upstream_result.json, fingerprint.pcap  # si se generan durante la prueba
 ```

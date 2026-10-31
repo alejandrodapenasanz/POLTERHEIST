@@ -22,7 +22,7 @@ import xml.etree.ElementTree as ET
 from contextlib import contextmanager
 from pathlib import Path
 
-VERSION = "2.1.0"
+VERSION = "2.2.0"
 BASE = Path(__file__).resolve().parent
 PROFILE_PATH = BASE / "config" / "profile.json"
 REPORTS = BASE / "reports"
@@ -1745,15 +1745,127 @@ def authorize_target(ap):
 
 
 def assessment_from_upstream(document, ap):
-    target = document.get("target", {})
-    if target.get("bssid", "").lower() != ap["bssid"].lower() or target.get("ssid") != ap["ssid"]:
+    if not isinstance(document, dict):
         return "ERROR"
+    target = document.get("target", {})
+    if (
+        not isinstance(target, dict)
+        or not isinstance(target.get("bssid"), str)
+        or target["bssid"].lower() != ap["bssid"].lower()
+        or target.get("ssid") != ap["ssid"]
+    ):
+        return "ERROR"
+    if not isinstance(document.get("assessment"), str):
+        return "INCONCLUSIVE"
     return {
         "LIKELY_VULNERABLE": "LIKELY_VULNERABLE",
         "PATCHED_HOSTAPD": "NOT_VULNERABLE_PER_DETECTOR",
         "NO_BROADCOM_FINGERPRINT": "NOT_VULNERABLE_PER_DETECTOR",
         "INCONCLUSIVE": "INCONCLUSIVE",
     }.get(document.get("assessment"), "INCONCLUSIVE")
+
+
+def fingerprint_summary(target, classification, original=None, reason=None):
+    """Explain the actual detector result; missing evidence is never a positive/negative."""
+    labels = {
+        "LIKELY_VULNERABLE": "PROBABLEMENTE VULNERABLE",
+        "NOT_VULNERABLE_PER_DETECTOR": "NEGATIVO SEGÚN EL DETECTOR",
+        "INCONCLUSIVE": "NO CONCLUYENTE",
+        "NOT_TESTED": "NO EVALUADO",
+        "ERROR": "ERROR EN LA EVALUACIÓN",
+    }
+    evidence_error = None
+    if classification not in labels:
+        classification = "INCONCLUSIVE"
+    if classification in {"LIKELY_VULNERABLE", "NOT_VULNERABLE_PER_DETECTOR", "INCONCLUSIVE"}:
+        if original is not None:
+            detected = assessment_from_upstream(original, target)
+            if detected == "ERROR":
+                evidence_error = "El resultado del detector no corresponde al SSID/BSSID seleccionado o tiene un formato no válido."
+            classification = detected
+        elif classification != "INCONCLUSIVE":
+            classification = "INCONCLUSIVE"
+            evidence_error = (
+                "No hay salida original del detector que respalde una conclusión de vulnerabilidad."
+            )
+    document = original if isinstance(original, dict) and not evidence_error else {}
+    transactions = document.get("transactions", [])
+    if not isinstance(transactions, list):
+        transactions = []
+    explanations = {
+        "LIKELY_VULNERABLE": "El detector identifica una respuesta compatible con Broadcom WPS Monitor: vulnerabilidad probable, sin confirmar RCE.",
+        "NOT_VULNERABLE_PER_DETECTOR": "La respuesta no coincide con la implementación vulnerable según este detector. No certifica que el equipo sea seguro frente a otras vulnerabilidades.",
+        "INCONCLUSIVE": "No hay evidencia suficiente para decidir si es vulnerable. Una ausencia de respuesta o de anuncios WPS no se interpreta como un resultado negativo.",
+        "NOT_TESTED": "No se ha ejecutado el fingerprint activo para este objetivo.",
+        "ERROR": "La evaluación ha fallado; no permite determinar si el objetivo es vulnerable.",
+    }
+    return {
+        "tool": "POLTERHEIST",
+        "version": VERSION,
+        "upstream_commit": UPSTREAM_COMMIT,
+        "target": {
+            "id": target.get("id"),
+            "ssid": target["ssid"],
+            "bssid": target["bssid"],
+            "channel": target.get("channel"),
+        },
+        "assessment": classification,
+        "verdict": labels[classification],
+        "explanation": explanations[classification],
+        "reason": evidence_error or reason,
+        "detector_assessment": document.get("assessment"),
+        "implementation": document.get("implementation"),
+        "target_health": document.get("target_health"),
+        "warning": document.get("warning"),
+        "transactions": [
+            transaction for transaction in transactions if isinstance(transaction, dict)
+        ],
+        "claim_boundary": "Fingerprint de implementación; no confirma explotación ni ejecución de código.",
+    }
+
+
+def show_fingerprint_result(summary, folder):
+    target = summary["target"]
+    print(tint("\nPOLTERHEIST :: WPS FINGERPRINT"))
+    print(
+        f"  SSID: {safe_text(target['ssid'])} | BSSID: {safe_text(target['bssid'])} | canal: {target['channel']}"
+    )
+    print(tint("  " + summary["verdict"] + " [" + summary["assessment"] + "]", AMBER))
+    print("  " + summary["explanation"])
+    if summary["reason"]:
+        print("  Motivo: " + safe_text(summary["reason"]))
+    if summary["detector_assessment"]:
+        print("  Resultado original: " + safe_text(summary["detector_assessment"]))
+    if summary["implementation"]:
+        print("  Implementación estimada: " + safe_text(summary["implementation"]))
+    if summary["target_health"]:
+        print("  Estado según detector: " + safe_text(summary["target_health"]))
+    for transaction in summary["transactions"]:
+        print("  Respuesta observada: " + safe_text(transaction.get("response", "Unknown")))
+        if transaction.get("detail"):
+            print("    " + safe_text(transaction["detail"]))
+    if summary["warning"]:
+        print("  Observación del detector: " + safe_text(summary["warning"]))
+    print(f"  Resultado: {folder / 'fingerprint.json'}")
+
+
+def save_fingerprint_summary(folder, report):
+    target = report.get("selected_target")
+    if target is None:
+        return None
+    summary = fingerprint_summary(
+        target,
+        report["assessment"],
+        report.get("original_fingerprint"),
+        report.get("error") or report.get("not_tested_reason"),
+    )
+    report["assessment"] = target["assessment"] = summary["assessment"]
+    for ap in report["access_points"]:
+        if ap["bssid"].lower() == target["bssid"].lower():
+            ap["assessment"] = summary["assessment"]
+    report["fingerprint"] = summary
+    dump_json(folder / "fingerprint.json", summary)
+    return summary
 
 
 def restricted_backend(upstream):
@@ -2081,6 +2193,7 @@ def wireless_recon():
         "assessment": "NOT_TESTED",
         "original_fingerprint": None,
         "authorization": None,
+        "not_tested_reason": None,
         "status": "running",
         "technical_limitations": [],
         "remediation": [
@@ -2101,11 +2214,26 @@ def wireless_recon():
         if not aps:
             print("  Sin AP observados. Revisa antena, banda, canal, rfkill y permisos.")
             return
-        target = select_item(aps, "ID del AP para evaluar WPS", "bssid")
+        print(tint("\nWPS FINGERPRINT :: comprobar vulnerabilidad de una red seleccionada"))
+        print(
+            "  El anuncio WPS por sí solo no indica si es vulnerable. Elige un ID para ejecutar el detector."
+        )
+        target = select_item(aps, "ID para ejecutar WPS FINGERPRINT", "bssid")
         if target is None:
             return
         report["selected_target"] = dict(target)
+        report["not_tested_reason"] = (
+            "No se ha elegido una interfaz monitor para iniciar la prueba."
+        )
         write_wireless_report(folder, report)
+        if iface.get("backend") == "windows" and not wlan_helper_path():
+            report["not_tested_reason"] = (
+                "Falta Npcap. Instálalo desde https://npcap.com/#download con "
+                "Support raw 802.11 traffic (and monitor mode), abre PowerShell "
+                "como administrador y prepara el adaptador monitor según el README."
+            )
+            report["technical_limitations"].append(report["not_tested_reason"])
+            return
         # Re-read immediately before authorization: never trust stale radio topology.
         current = detect_wireless_interfaces()
         monitors = [i for i in current if i["mode"] == "monitor"]
@@ -2124,6 +2252,9 @@ def wireless_recon():
                 current = detect_wireless_interfaces()
                 monitors = [i for i in current if i["mode"] == "monitor"]
         if not monitors:
+            report["not_tested_reason"] = (
+                "No hay una interfaz monitor preparada. Prepara un adaptador compatible en el canal del objetivo; consulta el README."
+            )
             report["technical_limitations"].append(
                 "NOT_TESTED: no hay una interfaz monitor preparada."
             )
@@ -2146,8 +2277,15 @@ def wireless_recon():
         report["fingerprint_interface"] = monitor["name"]
         write_wireless_report(folder, report)
         if not authorized:
+            report["not_tested_reason"] = (
+                "El objetivo no fue autorizado; no se enviaron pruebas WPS."
+            )
             report["technical_limitations"].append("NOT_TESTED: el operador no autorizó el BSSID.")
             return
+        report["not_tested_reason"] = None
+        report["assessment"] = "INCONCLUSIVE"
+        report["status"] = "fingerprinting"
+        write_wireless_report(folder, report)
         outcome = fingerprint_selected(target, monitor, current, folder, authorized=True)
         target["assessment"] = outcome["classification"]
         report["selected_target"] = dict(target)
@@ -2156,22 +2294,30 @@ def wireless_recon():
         report["error"] = outcome["error"]
         report["technical_limitations"].extend(outcome["limitations"])
         report["status"] = "assessed"
-        if outcome["original"]:
+        if (
+            isinstance(outcome["original"], dict)
+            and assessment_from_upstream(outcome["original"], target) != "ERROR"
+        ):
             identity = outcome["original"].get("target", {}).get("wps_identity", {})
             report["manufacturer_evidence"] = target["manufacturer_evidence"] + [
                 {"source": "upstream WPS identity", "value": identity}
             ]
-        if outcome["error"]:
-            print(tint("  " + safe_text(outcome["error"]), AMBER))
-        show_wifi([target])
     except (KeyboardInterrupt, EOFError):
         report["status"] = "cancelled"
+        report["not_tested_reason"] = (
+            "Interrumpido por el operador antes de completar la evaluación."
+        )
         print("\n  Cancelado; se conservan las evidencias disponibles.")
     except Exception as error:
+        if report["status"] == "fingerprinting":
+            report["assessment"] = "ERROR"
         report.update(status="error", error=str(error))
         raise
     finally:
+        summary = save_fingerprint_summary(folder, report)
         write_wireless_report(folder, report)
+        if summary is not None:
+            show_fingerprint_result(summary, folder)
         print(f"  Informe y evidencias: {folder}")
 
 
@@ -2214,6 +2360,7 @@ def main(argv=None):
     parser.add_argument(
         "--wireless",
         "--wpscan",
+        "--fingerprint",
         action="store_true",
         help="Abrir directamente el descubrimiento Wi-Fi y la evaluación WPS",
     )

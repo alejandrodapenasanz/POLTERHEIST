@@ -522,7 +522,10 @@ class UpstreamIntegrationTests(QuietTest):
         aps = app.parse_iw_scan(IW_SCAN)
         outcome = {
             "classification": "LIKELY_VULNERABLE",
-            "original": None,
+            "original": {
+                "target": {"ssid": aps[1]["ssid"], "bssid": aps[1]["bssid"]},
+                "assessment": "LIKELY_VULNERABLE",
+            },
             "error": None,
             "limitations": [],
         }

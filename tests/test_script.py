@@ -317,6 +317,7 @@ class WirelessParsingTests(QuietTest):
 
     def test_detect_interfaces_uses_real_iw_format(self):
         with (
+            patch.object(app.sys, "platform", "linux"),
             patch.object(app, "require_tools"),
             patch.object(
                 app,

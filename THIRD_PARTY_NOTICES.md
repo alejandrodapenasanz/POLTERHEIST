@@ -4,4 +4,4 @@
 
 Copyright (c) 2026 Quentin Kaiser. Licencia MIT; texto completo en [`vendor/broadcom-wps/LICENSE.md`](vendor/broadcom-wps/LICENSE.md). [`UPSTREAM.json`](vendor/broadcom-wps/UPSTREAM.json) registra procedencia y hashes SHA-256. `.gitattributes` evita transformar los finales de línea de estos archivos.
 
-POLTERHEIST importa la implementación y añade la selección/autorización por BSSID, inventario, informes y restricciones de transporte en `script.py`. No modifica el archivo upstream ni sus decisiones de detección. El bloqueo de su limpieza por desautenticación se declara expresamente en los informes y en el README.
+POLTERHEIST importa la implementación y añade la selección/autorización por BSSID, inventario, informes y restricciones de transporte en `script.py`. En Windows adapta temporalmente la captura/transmisión a Scapy/Npcap y comprueba un canal preparado manualmente en lugar de ejecutar `iw`. No modifica el archivo upstream ni sus decisiones de detección. El bloqueo de su limpieza por desautenticación se declara expresamente en los informes y en el README.

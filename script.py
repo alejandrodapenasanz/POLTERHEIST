@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-"""POLTERHEIST: inventario LAN y reconocimiento Wi-Fi autorizado (Kali Linux)."""
+"""POLTERHEIST: inventario LAN (Linux) y reconocimiento Wi-Fi (Linux/Windows)."""
 
 import argparse
 import csv
+import ctypes
 import datetime
 import hashlib
 import importlib.util
@@ -18,9 +19,10 @@ import threading
 import time
 import uuid
 import xml.etree.ElementTree as ET
+from contextlib import contextmanager
 from pathlib import Path
 
-VERSION = "2.0.0"
+VERSION = "2.1.0"
 BASE = Path(__file__).resolve().parent
 PROFILE_PATH = BASE / "config" / "profile.json"
 REPORTS = BASE / "reports"
@@ -203,7 +205,7 @@ def run_quiet(cmd, timeout=120):
 def require_linux(root=False):
     if not sys.platform.startswith("linux"):
         raise RuntimeError(
-            "El reconocimiento requiere Kali/Linux. El menú y las pruebas funcionan aquí."
+            "Esta función requiere Kali/Linux. En Windows están disponibles el menú, el perfil y WIRELESS RECON."
         )
     if root and os.geteuid() != 0:
         raise RuntimeError("Necesitas root: sudo .venv/bin/python script.py")
@@ -770,6 +772,411 @@ def lan_recon():
 MAC = re.compile(r"^[0-9a-fA-F]{2}(?::[0-9a-fA-F]{2}){5}$")
 
 
+# Native Wi-Fi API: fixed-width fields also make the binary parsers testable on Linux.
+class WinGUID(ctypes.Structure):
+    _fields_ = [
+        ("data1", ctypes.c_uint32),
+        ("data2", ctypes.c_uint16),
+        ("data3", ctypes.c_uint16),
+        ("data4", ctypes.c_ubyte * 8),
+    ]
+
+    @classmethod
+    def from_text(cls, value):
+        return cls.from_buffer_copy(uuid.UUID(value.strip("{}")).bytes_le)
+
+    def text(self):
+        return str(uuid.UUID(bytes_le=bytes(self)))
+
+
+class WinInterface(ctypes.Structure):
+    _fields_ = [
+        ("guid", WinGUID),
+        ("description", ctypes.c_uint16 * 256),
+        ("state", ctypes.c_uint32),
+    ]
+
+
+class WinSSID(ctypes.Structure):
+    _fields_ = [("length", ctypes.c_uint32), ("data", ctypes.c_ubyte * 32)]
+
+
+class WinRateSet(ctypes.Structure):
+    _fields_ = [("length", ctypes.c_uint32), ("rates", ctypes.c_uint16 * 126)]
+
+
+class WinBssEntry(ctypes.Structure):
+    _fields_ = [
+        ("ssid", WinSSID),
+        ("phy_id", ctypes.c_uint32),
+        ("bssid", ctypes.c_ubyte * 6),
+        ("bss_type", ctypes.c_uint32),
+        ("phy_type", ctypes.c_uint32),
+        ("rssi", ctypes.c_int32),
+        ("quality", ctypes.c_uint32),
+        ("in_reg_domain", ctypes.c_ubyte),
+        ("beacon_period", ctypes.c_uint16),
+        ("timestamp", ctypes.c_uint64),
+        ("host_timestamp", ctypes.c_uint64),
+        ("capability", ctypes.c_uint16),
+        ("frequency_khz", ctypes.c_uint32),
+        ("rates", WinRateSet),
+        ("ie_offset", ctypes.c_uint32),
+        ("ie_size", ctypes.c_uint32),
+    ]
+
+
+class WinNotification(ctypes.Structure):
+    _fields_ = [
+        ("source", ctypes.c_uint32),
+        ("code", ctypes.c_uint32),
+        ("guid", WinGUID),
+        ("size", ctypes.c_uint32),
+        ("data", ctypes.c_void_p),
+    ]
+
+
+def windows_wlan_error(code, operation):
+    if code == 5:
+        detail = (
+            "Acceso denegado: activa el acceso a Ubicación en Configuración > "
+            "Privacidad y seguridad > Ubicación para esta aplicación/terminal."
+        )
+    elif code == 1062:
+        detail = "Inicia el servicio Configuración automática de WLAN (WlanSvc)."
+    elif code == 5023:
+        detail = (
+            "La interfaz no está disponible en este modo; revisa radio, controlador y modo monitor."
+        )
+    else:
+        detail = "Revisa el adaptador, la radio Wi-Fi y su controlador."
+    return RuntimeError(f"{operation}: error Windows {code}. {detail}")
+
+
+def parse_windows_interfaces(data):
+    if len(data) < 8:
+        raise ValueError("Lista de interfaces WLAN truncada")
+    count = int.from_bytes(data[:4], "little")
+    size = ctypes.sizeof(WinInterface)
+    if count > 1024 or 8 + count * size > len(data):
+        raise ValueError("Tamaño de interfaces WLAN no válido")
+    result = []
+    for offset in range(8, 8 + count * size, size):
+        item = WinInterface.from_buffer_copy(data, offset)
+        guid = item.guid.text()
+        result.append(
+            {
+                "name": guid,
+                "guid": guid,
+                "display_name": bytes(item.description)
+                .decode("utf-16-le", errors="replace")
+                .split("\0")[0],
+                "capture_name": "\\Device\\NPF_{" + guid.upper() + "}",
+                "backend": "windows",
+                "mode": "managed",
+                "phy": None,
+                "driver": "Windows Native Wi-Fi",
+                "connected": item.state not in {0, 4},
+                "connection_state": item.state,
+                "channel": None,
+                "frequency_mhz": None,
+                "capabilities": [],
+                "frequencies": [],
+            }
+        )
+    return result
+
+
+def information_element_security(ap, raw, capability):
+    """Decode discovery evidence only; WPS vulnerability decisions stay in upstream."""
+    labels = []
+    offset = 0
+    warnings = []
+    while offset < len(raw):
+        if offset + 2 > len(raw):
+            warnings.append("Cabecera IE truncada")
+            break
+        element, size = raw[offset : offset + 2]
+        offset += 2
+        if offset + size > len(raw):
+            warnings.append("Contenido IE truncado")
+            break
+        body = raw[offset : offset + size]
+        offset += size
+        if element == 48:
+            try:
+                labels.extend(security_from_akms(rsn_akms(body)))
+            except ValueError:
+                labels.append("RSN (AKM unknown)")
+        elif element == 221 and body.startswith(b"\x00\x50\xf2\x01"):
+            labels.append("WPA")
+        elif element == 221 and body.startswith(b"\x00\x50\xf2\x04"):
+            ap["wps"] = "Detected"
+            ap["wps_indicators"].append("WPS IE / Windows Native Wi-Fi")
+            pos = 4
+            while pos + 4 <= len(body):
+                key = int.from_bytes(body[pos : pos + 2], "big")
+                length = int.from_bytes(body[pos + 2 : pos + 4], "big")
+                pos += 4
+                if pos + length > len(body):
+                    warnings.append("Atributo WPS truncado")
+                    break
+                value = body[pos : pos + length]
+                pos += length
+                if key == 0x1021:
+                    ap["manufacturer_evidence"].append(
+                        {
+                            "source": "WPS IE / Windows Native Wi-Fi",
+                            "value": value.rstrip(b"\0").decode("utf-8", errors="replace"),
+                        }
+                    )
+                elif key in {0x1044, 0x1057}:
+                    ap["wps_indicators"].append(
+                        f"{'WPS state' if key == 0x1044 else 'AP setup locked'}: {value.hex()}"
+                    )
+    ap["security"] = (
+        "/".join(dict.fromkeys(labels))
+        if labels
+        else ("Unknown" if warnings else "WEP/Unknown" if capability & 0x10 else "OPEN")
+    )
+    if warnings:
+        ap["discovery_warnings"] = warnings
+
+
+def parse_windows_bss(data):
+    if len(data) < 8:
+        raise ValueError("Lista BSS truncada")
+    total = int.from_bytes(data[:4], "little")
+    count = int.from_bytes(data[4:8], "little")
+    size = ctypes.sizeof(WinBssEntry)
+    entries_end = 8 + count * size
+    if total != len(data) or entries_end > total:
+        raise ValueError("Tamaño BSS no válido")
+    aps = []
+    for offset in range(8, entries_end, size):
+        item = WinBssEntry.from_buffer_copy(data, offset)
+        if item.ssid.length > 32:
+            raise ValueError("SSID de más de 32 bytes en BSS")
+        start = offset + item.ie_offset
+        end = start + item.ie_size
+        if item.ie_size and (start < entries_end or end > total):
+            raise ValueError("IE fuera del buffer BSS")
+        ssid = bytes(item.ssid.data[: item.ssid.length])
+        ap = new_ap(
+            bytes(item.bssid).hex(":"),
+            ssid.decode("utf-8", errors="replace"),
+            "Windows Native Wi-Fi",
+        )
+        ap.update(
+            ssid_hex=ssid.hex(),
+            frequency_mhz=item.frequency_khz // 1000,
+            signal_dbm=item.rssi,
+            signal_percent=item.quality,
+            in_reg_domain=bool(item.in_reg_domain),
+            seen_at_windows_ticks=item.host_timestamp,
+        )
+        ap["channel"] = frequency_channel(ap["frequency_mhz"])
+        raw = data[start:end] if item.ie_size else b""
+        ap["information_elements_hex"] = raw.hex()
+        information_element_security(ap, raw, item.capability)
+        aps.append(ap)
+    return stable_ap_ids(aps)
+
+
+class WindowsWlan:
+    """Minimal Native Wi-Fi client. No locale-dependent netsh parsing or mode changes."""
+
+    def __enter__(self):
+        if sys.platform != "win32":
+            raise RuntimeError("Native Wi-Fi requiere Windows")
+        self.dll = ctypes.WinDLL("wlanapi.dll", winmode=0x800)
+        ptr = ctypes.c_void_p
+        uint = ctypes.c_uint32
+        signatures = {
+            "WlanOpenHandle": [uint, ptr, ctypes.POINTER(uint), ctypes.POINTER(ptr)],
+            "WlanCloseHandle": [ptr, ptr],
+            "WlanEnumInterfaces": [ptr, ptr, ctypes.POINTER(ptr)],
+            "WlanGetNetworkBssList": [
+                ptr,
+                ctypes.POINTER(WinGUID),
+                ptr,
+                uint,
+                ctypes.c_int32,
+                ptr,
+                ctypes.POINTER(ptr),
+            ],
+            "WlanScan": [ptr, ctypes.POINTER(WinGUID), ptr, ptr, ptr],
+            "WlanRegisterNotification": [
+                ptr,
+                uint,
+                ctypes.c_int32,
+                ptr,
+                ptr,
+                ptr,
+                ctypes.POINTER(uint),
+            ],
+            "WlanFreeMemory": [ptr],
+        }
+        for name, arguments in signatures.items():
+            function = getattr(self.dll, name)
+            function.argtypes = arguments
+            function.restype = None if name == "WlanFreeMemory" else uint
+        self.handle = ptr()
+        version = uint()
+        self.check(
+            self.dll.WlanOpenHandle(2, None, ctypes.byref(version), ctypes.byref(self.handle)),
+            "WlanOpenHandle",
+        )
+        return self
+
+    @staticmethod
+    def check(code, operation):
+        if code:
+            raise windows_wlan_error(code, operation)
+
+    def __exit__(self, *args):
+        self.dll.WlanCloseHandle(self.handle, None)
+        self._scan_callback = None
+
+    def interfaces(self):
+        ptr = ctypes.c_void_p()
+        self.check(
+            self.dll.WlanEnumInterfaces(self.handle, None, ctypes.byref(ptr)), "WlanEnumInterfaces"
+        )
+        try:
+            if not ptr.value:
+                raise RuntimeError("WlanEnumInterfaces devolvió un buffer vacío")
+            count = ctypes.c_uint32.from_address(ptr.value).value
+            if count > 1024:
+                raise ValueError("Demasiadas interfaces WLAN")
+            return parse_windows_interfaces(
+                ctypes.string_at(ptr, 8 + count * ctypes.sizeof(WinInterface))
+            )
+        finally:
+            self.dll.WlanFreeMemory(ptr)
+
+    def scan(self, guid_text, timeout=15):
+        guid = WinGUID.from_text(guid_text)
+        done = threading.Event()
+        outcome = []
+        callback_type = ctypes.WINFUNCTYPE(None, ctypes.POINTER(WinNotification), ctypes.c_void_p)
+
+        def notified(pointer, _context):
+            notice = pointer.contents
+            if notice.source & 8 and bytes(notice.guid) == bytes(guid) and notice.code in {7, 8}:
+                outcome.append(notice.code)
+                done.set()
+
+        callback = callback_type(notified)
+        self._scan_callback = callback
+        self.check(
+            self.dll.WlanRegisterNotification(self.handle, 8, False, callback, None, None, None),
+            "WlanRegisterNotification",
+        )
+        try:
+            self.check(
+                self.dll.WlanScan(self.handle, ctypes.byref(guid), None, None, None), "WlanScan"
+            )
+            if not done.wait(timeout):
+                return "Windows no confirmó la actualización en 15 s; los resultados pueden proceder de caché."
+            if outcome[-1] == 8:
+                return "Windows notificó un fallo de actualización; se conserva la caché BSS disponible."
+            return None
+        finally:
+            # Unregister outside the callback; keep it alive until callbacks have finished.
+            self.dll.WlanRegisterNotification(self.handle, 0, False, None, None, None, None)
+
+    def bss(self, guid_text):
+        guid = WinGUID.from_text(guid_text)
+        ptr = ctypes.c_void_p()
+        self.check(
+            self.dll.WlanGetNetworkBssList(
+                self.handle, ctypes.byref(guid), None, 3, False, None, ctypes.byref(ptr)
+            ),
+            "WlanGetNetworkBssList",
+        )
+        try:
+            if not ptr.value:
+                raise RuntimeError("WlanGetNetworkBssList devolvió un buffer vacío")
+            size = ctypes.c_uint32.from_address(ptr.value).value
+            if not 8 <= size <= 64 * 1024 * 1024:
+                raise ValueError("Buffer BSS de tamaño no válido")
+            return ctypes.string_at(ptr, size)
+        finally:
+            self.dll.WlanFreeMemory(ptr)
+
+
+def wlan_helper_path():
+    root = os.environ.get("SystemRoot", r"C:\Windows")
+    candidate = Path(root) / "System32" / "Npcap" / "WlanHelper.exe"
+    return str(candidate) if candidate.is_file() else None
+
+
+def wlan_helper(guid, setting, value=None):
+    path = wlan_helper_path()
+    if not path:
+        raise RuntimeError(
+            "Instala Npcap con Support raw 802.11 traffic (and monitor mode); falta WlanHelper.exe."
+        )
+    guid = str(uuid.UUID(guid.strip("{}")))
+    if setting not in {"mode", "modes", "channel", "freq"} or (
+        value is not None and setting not in {"channel", "freq"}
+    ):
+        raise ValueError("Operación WlanHelper no permitida")
+    command = [path, guid, setting]
+    if value is not None:
+        command.append(str(int(value)))
+    result = run_quiet(command, timeout=10)
+    if result is None or result.returncode:
+        raise RuntimeError(
+            "WlanHelper no pudo consultar/configurar el adaptador. Abre PowerShell como administrador y revisa Npcap/controlador."
+        )
+    return result.stdout.strip()
+
+
+def detect_windows_interfaces():
+    with WindowsWlan() as wlan:
+        interfaces = wlan.interfaces()
+    for iface in interfaces:
+        if not wlan_helper_path():
+            iface["monitor_note"] = (
+                "Npcap/WlanHelper no instalado; disponible descubrimiento nativo."
+            )
+            continue
+        try:
+            mode = wlan_helper(iface["guid"], "mode").casefold()
+            iface["mode"] = mode if mode in {"monitor", "managed"} else "unknown"
+            iface["capabilities"] = [
+                m.strip() for m in wlan_helper(iface["guid"], "modes").split(",")
+            ]
+            if mode == "monitor":
+                channel = wlan_helper(iface["guid"], "channel")
+                if channel.isdigit():
+                    iface["channel"] = int(channel)
+        except RuntimeError as error:
+            iface["monitor_note"] = str(error)
+    return interfaces
+
+
+def discover_windows_wifi(iface, folder, limitations):
+    if iface["mode"] == "monitor":
+        raise RuntimeError(
+            "Para descubrir redes con Windows usa una interfaz managed; el monitor se selecciona después para la prueba WPS."
+        )
+    with WindowsWlan() as wlan, Spinner("Wi-Fi / Windows Native Wi-Fi"):
+        warning = wlan.scan(iface["guid"])
+        if warning:
+            limitations.append(warning)
+        data = wlan.bss(iface["guid"])
+    (folder / "windows_bss.bin").write_bytes(data)
+    aps = parse_windows_bss(data)
+    dump_json(folder / "windows_discovery.json", aps)
+    limitations.append(
+        "Datos BSS/IE del controlador Windows; no son una captura PCAP. La API puede usar caché."
+    )
+    return aps
+
+
 def parse_iw_interfaces(output):
     interfaces = []
     phy = None
@@ -831,6 +1238,8 @@ def parse_phy(output):
 
 
 def detect_wireless_interfaces():
+    if sys.platform == "win32":
+        return detect_windows_interfaces()
     require_tools("iw")
     result = run_quiet(["iw", "dev"], timeout=10)
     if result is None or result.returncode:
@@ -1221,6 +1630,8 @@ def monitor_discovery(iface, interfaces, folder, limitations):
 
 
 def discover_wifi(iface, interfaces, folder, limitations):
+    if iface.get("backend") == "windows":
+        return discover_windows_wifi(iface, folder, limitations)
     if iface["mode"] == "monitor":
         return monitor_discovery(iface, interfaces, folder, limitations)
     if iface["mode"] != "managed":
@@ -1307,7 +1718,8 @@ def select_item(items, label, key="name"):
         return None
     mapping = {str(item.get("id", index)): item for index, item in enumerate(items, 1)}
     for number, item in mapping.items():
-        print(f"  [{number}] {safe_text(item[key])}")
+        label_value = item.get("display_name", item[key]) if key == "name" else item[key]
+        print(f"  [{number}] {safe_text(label_value)}")
     while True:
         choice = input(f"  {label} (q volver): ").strip().lower()
         if choice == "q":
@@ -1348,6 +1760,14 @@ def restricted_backend(upstream):
     class SelectedTargetBackend(upstream.ScapyFingerprintBackend):
         """Transport guard only. Upstream fragment generation and decisions are unchanged."""
 
+        def __enter__(self):
+            try:
+                return super().__enter__()
+            except BaseException:
+                # __exit__ is not called when capture startup itself is interrupted.
+                self._stop_capture()
+                raise
+
         def _deauthenticate(self, station):
             # Raising is intentional: upstream must report cleanup_sent=False.
             raise upstream.FingerprintError(
@@ -1385,6 +1805,11 @@ def observe_selected(upstream, iface, ap, writer, seconds=8):
         ):
             if observed.channel != ap["channel"]:
                 return
+            if iface.get("backend") == "windows":
+                # A Windows monitor must provide real Radiotap evidence of the band.
+                frequency = getattr(packet.getlayer(upstream.RadioTap), "ChannelFrequency", None)
+                if frequency != ap["frequency_mhz"]:
+                    return
             with lock:
                 writer.write(packet)
                 observations.append(observed)
@@ -1403,7 +1828,146 @@ def observe_selected(upstream, iface, ap, writer, seconds=8):
     return observations[-1]
 
 
+def require_windows_monitor(ap, iface):
+    if sys.platform != "win32":
+        raise RuntimeError("El transporte Npcap requiere Windows")
+    if not ctypes.windll.shell32.IsUserAnAdmin():
+        raise RuntimeError("Para evaluar WPS con Npcap, abre PowerShell como administrador.")
+    if not ap.get("frequency_mhz") or not 2412 <= ap["frequency_mhz"] <= 2484:
+        raise RuntimeError(
+            "La prueba WPS en Windows admite 2.4 GHz; para 5 GHz utiliza Linux. El detector no admite 6 GHz."
+        )
+    if not ap.get("channel") or frequency_channel(ap["frequency_mhz"]) != ap["channel"]:
+        raise RuntimeError("Canal/frecuencia del objetivo incoherente")
+    if iface.get("connected"):
+        raise RuntimeError(
+            "El adaptador sigue conectado. Prepara manualmente un adaptador dedicado en modo monitor."
+        )
+    if not MAC.fullmatch(ap["bssid"]) or not ap["ssid"] or len(ap["ssid"].encode("utf-8")) > 32:
+        raise ValueError("SSID/BSSID no válido para el detector")
+    if ap.get("ssid_hex") and ap["ssid"].encode("utf-8").hex() != ap["ssid_hex"]:
+        raise ValueError("El SSID no es UTF-8; el detector upstream requiere un SSID UTF-8 exacto.")
+    if ap.get("in_reg_domain") is False:
+        raise RuntimeError("Windows indica que el AP está fuera del dominio regulatorio.")
+    mode = wlan_helper(iface["guid"], "mode").casefold()
+    channel = wlan_helper(iface["guid"], "channel")
+    if mode != "monitor" or channel != str(ap["channel"]):
+        raise RuntimeError(
+            f"Prepara manualmente el adaptador en modo monitor y canal {ap['channel']}. No se ha cambiado tu conexión."
+        )
+
+
+def open_windows_monitor_socket(capture_name):
+    from scapy.config import conf
+
+    if not conf.use_pcap:
+        raise RuntimeError(
+            "Scapy no encuentra Npcap. Instálalo con soporte raw 802.11 y reinicia la terminal."
+        )
+    socket = conf.L2socket(iface=capture_name, monitor=True)
+    try:
+        if socket.pcap_fd.datalink() != 127:
+            raise RuntimeError(
+                "Npcap no entrega Radiotap/802.11; no se puede ejecutar la prueba WPS con tramas Ethernet."
+            )
+    except BaseException:
+        socket.close()
+        raise
+    return socket
+
+
+@contextmanager
+def windows_upstream_transport(upstream, iface, ap):
+    """Replace only platform I/O temporarily; never touch the upstream detector/frames."""
+    send, sniff, channel = upstream.sendp, upstream.AsyncSniffer, upstream.set_channel
+    capture_name = "\\Device\\NPF_{" + str(uuid.UUID(iface["guid"])).upper() + "}"
+    socket = open_windows_monitor_socket(capture_name)
+
+    def pinned_channel(interface, requested):
+        if interface != iface["name"] or requested != ap["channel"]:
+            raise RuntimeError("El detector intentó cambiar de interfaz/canal")
+        if wlan_helper(iface["guid"], "mode") != "monitor" or wlan_helper(
+            iface["guid"], "channel"
+        ) != str(requested):
+            raise RuntimeError(
+                "El modo/canal cambió durante la prueba; vuelve a preparar el adaptador."
+            )
+
+    def pinned_send(packet, **kwargs):
+        if kwargs.pop("iface", None) != iface["name"]:
+            raise RuntimeError("Interfaz de transmisión distinta a la seleccionada")
+        return send(packet, iface=capture_name, socket=socket, **kwargs)
+
+    def pinned_sniff(**kwargs):
+        if kwargs.pop("iface", None) != iface["name"]:
+            raise RuntimeError("Interfaz de captura distinta a la seleccionada")
+        return sniff(iface=capture_name, monitor=True, **kwargs)
+
+    upstream.sendp, upstream.AsyncSniffer, upstream.set_channel = (
+        pinned_send,
+        pinned_sniff,
+        pinned_channel,
+    )
+    try:
+        yield
+    finally:
+        upstream.sendp, upstream.AsyncSniffer, upstream.set_channel = send, sniff, channel
+        socket.close()
+
+
+def fingerprint_windows(ap, iface, folder, authorized=False):
+    result = {
+        "classification": "NOT_TESTED",
+        "original": None,
+        "error": None,
+        "upstream_commit": UPSTREAM_COMMIT,
+        "authorized": bool(authorized),
+        "limitations": [],
+    }
+    if not authorized:
+        return result
+    writer = None
+    try:
+        require_windows_monitor(ap, iface)
+        upstream = load_upstream()
+        with (
+            windows_upstream_transport(upstream, iface, ap),
+            Spinner("WPS / Npcap / " + ap["bssid"]),
+        ):
+            writer = upstream.PcapWriter(str(folder / "fingerprint.pcap"), linktype=127, sync=True)
+            observed = observe_selected(upstream, iface, ap, writer)
+            with restricted_backend(upstream)(iface["name"], observed, writer) as backend:
+                detected = upstream.fingerprint_target(observed, backend)
+            upstream.write_result_json(
+                detected, folder / "upstream_result.json", folder / "fingerprint.pcap"
+            )
+        result["original"] = json.loads(
+            (folder / "upstream_result.json").read_text(encoding="utf-8")
+        )
+        result["classification"] = assessment_from_upstream(result["original"], ap)
+    except (KeyboardInterrupt, EOFError):
+        result.update(classification="INCONCLUSIVE", error="Interrumpido por el operador")
+    except Exception as error:
+        result.update(classification="ERROR", error=f"{type(error).__name__}: {error}")
+    finally:
+        if writer is not None:
+            try:
+                writer.close()
+            except Exception as error:
+                result["limitations"].append("Error cerrando PCAP: " + str(error))
+    result["limitations"].extend(
+        [
+            "Windows/Npcap: modo monitor y canal 2.4 GHz preparados manualmente; no se cambian desde la aplicación.",
+            "Recepción/inyección dependen de Npcap y del controlador. La ausencia de respuesta no demuestra que el AP sea seguro.",
+            "Desautenticación bloqueada en transporte: cleanup_sent=false; se conserva target_health upstream.",
+        ]
+    )
+    return result
+
+
 def fingerprint_selected(ap, iface, interfaces, folder, authorized=False):
+    if iface.get("backend") == "windows":
+        return fingerprint_windows(ap, iface, folder, authorized=authorized)
     result = {
         "classification": "NOT_TESTED",
         "original": None,
@@ -1485,19 +2049,22 @@ def write_wireless_report(folder, report):
 
 
 def wireless_recon():
-    require_linux()
+    if sys.platform != "win32":
+        require_linux()
     interfaces = detect_wireless_interfaces()
     if not interfaces:
         raise RuntimeError(
-            "No hay interfaces Wi-Fi. Revisa rfkill, firmware y controladores. "
+            "No hay interfaces Wi-Fi. Revisa la radio, WlanSvc (Windows), rfkill (Linux), firmware y controladores. "
             "En VirtualBox necesitas USB Wi-Fi passthrough; Ethernet puenteada no captura 802.11."
         )
     print(tint("\nPOLTERHEIST :: WIRELESS INTERFACES"))
     for iface in interfaces:
         print(
-            f"  {safe_text(iface['name'])} | {iface['mode']} | PHY={iface['phy']} | "
+            f"  {safe_text(iface.get('display_name', iface['name']))} | {iface['mode']} | PHY={iface['phy']} | "
             f"driver={safe_text(iface['driver'])} | modos={', '.join(iface['capabilities'])} | conectada={iface['connected']}"
         )
+        if iface.get("monitor_note"):
+            print("    " + safe_text(iface["monitor_note"]))
     iface = select_item(interfaces, "Interfaz para descubrimiento")
     if iface is None:
         return
@@ -1542,6 +2109,20 @@ def wireless_recon():
         # Re-read immediately before authorization: never trust stale radio topology.
         current = detect_wireless_interfaces()
         monitors = [i for i in current if i["mode"] == "monitor"]
+        if not monitors and iface.get("backend") == "windows" and wlan_helper_path():
+            print(
+                "  Prepara manualmente un adaptador dedicado en modo monitor y en el canal del AP (README)."
+            )
+            if (
+                input(
+                    "  INTRO para volver a buscar interfaces monitor; q para guardar sin evaluar: "
+                )
+                .strip()
+                .lower()
+                != "q"
+            ):
+                current = detect_wireless_interfaces()
+                monitors = [i for i in current if i["mode"] == "monitor"]
         if not monitors:
             report["technical_limitations"].append(
                 "NOT_TESTED: no hay una interfaz monitor preparada."
@@ -1553,7 +2134,8 @@ def wireless_recon():
         monitor = select_item(monitors, "Interfaz monitor para el detector")
         if monitor is None:
             return
-        require_isolated_monitor(monitor, current)
+        if monitor.get("backend") != "windows":
+            require_isolated_monitor(monitor, current)
         authorized = authorize_target(target)
         report["authorization"] = {
             "granted": authorized,
@@ -1629,13 +2211,35 @@ def main(argv=None):
     )
     parser.add_argument("--version", action="version", version="POLTERHEIST " + VERSION)
     parser.add_argument("--check", action="store_true", help="Diagnóstico local; no escanea la red")
+    parser.add_argument(
+        "--wireless",
+        "--wpscan",
+        action="store_true",
+        help="Abrir directamente el descubrimiento Wi-Fi y la evaluación WPS",
+    )
     options = parser.parse_args(argv)
     if options.check:
         print(
             "POLTERHEIST " + VERSION + " | Python " + sys.version.split()[0] + " | " + sys.platform
         )
-        for binary in ("nmap", "arp-scan", "ip", "iw", "nmcli", "tcpdump"):
-            print(f"  {binary}: {shutil.which(binary) or 'no encontrado'}")
+        if sys.platform == "win32":
+            print("  Descubrimiento Wi-Fi/WPS: API nativa de Windows (sin WSL/Nmap)")
+            print(
+                "  Npcap / WlanHelper: "
+                + (wlan_helper_path() or "no instalado; necesario para fingerprint activo")
+            )
+            try:
+                for iface in detect_windows_interfaces():
+                    print(
+                        f"  {safe_text(iface['display_name'])} | GUID={iface['guid']} | modo={iface['mode']}"
+                    )
+                    if iface.get("monitor_note"):
+                        print("    " + safe_text(iface["monitor_note"]))
+            except (OSError, ValueError, RuntimeError) as error:
+                print("  Wi-Fi: " + safe_text(error))
+        else:
+            for binary in ("nmap", "arp-scan", "ip", "iw", "nmcli", "tcpdump"):
+                print(f"  {binary}: {shutil.which(binary) or 'no encontrado'}")
         try:
             load_upstream()
             print("  Detector upstream: hash verificado, Scapy disponible")
@@ -1644,6 +2248,15 @@ def main(argv=None):
         return 0
     print(tint(BANNER))
     print(tint(f"  POLTERHEIST :: WATCHING THE WIRE :: v{VERSION}", AMBER))
+    if options.wireless:
+        try:
+            wireless_recon()
+            return 0
+        except (KeyboardInterrupt, EOFError):
+            return 130
+        except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as error:
+            print(tint("  [!] " + safe_text(error), AMBER))
+            return 1
     while True:
         print(tint("\n[0] WHO AM I?\n[1] LAN RECON\n[2] WIRELESS RECON\n\n[q] EXIT"))
         try:

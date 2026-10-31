@@ -1,6 +1,6 @@
 # POLTERHEIST
 
-Herramienta de inventario y evaluación de redes propias o autorizadas para **Kali Linux**, con interfaz de terminal verde, el nuevo arte ASCII y tres entradas:
+Herramienta de inventario y evaluación de redes propias o autorizadas: **LAN en Kali Linux y Wi-Fi/WPS en Linux y Windows**, con interfaz de terminal verde, arte ASCII y tres entradas:
 
 ```text
 [0] WHO AM I?
@@ -27,7 +27,55 @@ sudo .venv/bin/python script.py
 
 `requirements.txt` fija Scapy 2.7.0. Los comandos del sistema se instalan con `apt`, no con `pip`. Menú, perfil y parsers no requieren root. LAN, captura monitor y fingerprint WPS sí. `arp-scan` es recomendable; si falta o falla, el descubrimiento continúa con Nmap. Para una captura con `tcpdump` se necesita el soporte libpcap que instala el paquete de Kali.
 
-En Windows funcionan el menú, el perfil y las pruebas sin hardware. Los flujos de reconocimiento requieren Linux; instalar solamente Nmap para Windows no proporciona `iw`, `ip` o `arp-scan`.
+El flujo LAN requiere Linux. El descubrimiento Wi-Fi y WPS dispone de un backend nativo de Windows; no necesita `iw`, WSL, Nmap ni `arp-scan`.
+
+## Wi-Fi y WPS en Windows
+
+Desde PowerShell, con Python 3.11 o posterior:
+
+```powershell
+py -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+.\.venv\Scripts\python.exe script.py --check
+.\.venv\Scripts\python.exe script.py --wpscan
+```
+
+`--wpscan` y `--wireless` abren directamente WIRELESS RECON; también puedes usar la opción `[2]` del menú. Aquí `wpscan` se refiere a WPS de Wi-Fi.
+
+El listado utiliza la **API Native Wi-Fi de Windows** (`wlanapi.dll`). Obtiene BSSID, SSID, frecuencia/canal, RSSI en dBm, calidad y elementos de información WPS/RSN/WPA proporcionados por el controlador. No depende del idioma de `netsh`. WPS solo aparece como `Detected` si existe un anuncio WPS; descubrirlo no significa que el AP sea vulnerable. Se conservan también los bytes originales del listado BSS y los IE.
+
+Este descubrimiento funciona con una interfaz Wi-Fi normal, incluso conectada. Solicita una actualización ordinaria a Windows, que puede emitir sondas de descubrimiento, y espera la notificación de finalización. Si Windows no la confirma, el informe indica que los datos pueden proceder de caché. No cambia el modo de la tarjeta ni desconecta la conexión.
+
+Si aparece **error 5 / acceso denegado**, permite el acceso a **Ubicación** en Configuración → Privacidad y seguridad → Ubicación para la aplicación/terminal. Windows protege con ese permiso la lectura de BSSID. Si aparece **error 1062**, revisa el servicio **Configuración automática de WLAN (`WlanSvc`)**. [Documentación de Microsoft](https://learn.microsoft.com/en-us/windows/win32/nativewifi/wi-fi-access-location-changes).
+
+### Prueba WPS activa con Npcap
+
+Para ejecutar el detector, además del listado, necesitas:
+
+- [Npcap](https://npcap.com/#download) instalado con la opción **Support raw 802.11 traffic (and monitor mode) for wireless adapters**. No se incluye ni instala automáticamente este controlador.
+- PowerShell **como administrador**.
+- Un adaptador/controlador que permita captura monitor e inyección 802.11. La capacidad de mostrar redes no demuestra que permita inyectar.
+- El adaptador preparado manualmente en monitor y en el canal del AP. Usa un adaptador dedicado si necesitas conservar tu conexión principal.
+
+El transporte Windows implementado admite la **prueba activa en 2.4 GHz**. El listado puede mostrar otras bandas; la prueba activa de 5 GHz permanece en el backend Linux y el detector no admite 6 GHz. Npcap debe entregar cabeceras Radiotap y el AP seleccionado debe observarse en la frecuencia exacta antes de transmitir. Un fallo de recepción/inyección produce `ERROR` o `INCONCLUSIVE`, nunca un negativo por suposición.
+
+Primero descubre y selecciona el AP. Si Npcap está instalado y falta una interfaz monitor, la aplicación permite volver a detectarla tras prepararla en otra ventana de PowerShell. Obtén el GUID con `--check` o `netsh wlan show interfaces` y usa el canal mostrado para el objetivo. Por ejemplo, para **un AP autorizado en el canal 6**, sustituye el GUID:
+
+```powershell
+$wifiGuid = 'GUID-DEL-ADAPTADOR'
+$wlanHelper = "$env:SystemRoot\System32\Npcap\WlanHelper.exe"
+& $wlanHelper $wifiGuid modes
+& $wlanHelper $wifiGuid mode monitor
+& $wlanHelper $wifiGuid channel 6
+```
+
+**El cambio manual a monitor desconecta ese adaptador.** POLTERHEIST comprueba modo/canal, pero no los cambia. Después de terminar, puedes devolverlo manualmente al modo normal:
+
+```powershell
+& $wlanHelper $wifiGuid mode managed
+```
+
+La prueba sigue exigiendo `AUTORIZO <BSSID>` y bloquea desautenticación/desasociación. Se adapta únicamente la captura/transmisión y el control de canal del detector original a Scapy/Npcap; su lógica de detección y los archivos upstream no se modifican. Si el controlador no admite este flujo, utiliza un adaptador compatible en Kali. [Requisitos de Npcap](https://npcap.com/guide/npcap-devguide.html#npcap-feature-dot11).
 
 ## Perfil
 
@@ -46,12 +94,13 @@ El alcance LAN es la subred IPv4 de la ruta predeterminada, con límite de 4096 
 
 ## WIRELESS RECON
 
-`iw` enumera interfaces, PHY, controlador, modo actual, conexión, modos admitidos y frecuencias. El programa no detiene NetworkManager ni convierte automáticamente una interfaz a monitor.
+En Linux, `iw` enumera interfaces, PHY, controlador, modo actual, conexión, modos admitidos y frecuencias. En Windows se utiliza Native Wi-Fi y, si está disponible, WlanHelper para consultar monitor. El programa no detiene NetworkManager ni convierte automáticamente una interfaz a monitor.
 
 | Interfaz | Descubrimiento | Límites |
 | --- | --- | --- |
 | Managed | `iw dev IFACE scan passive`; si falla, `nmcli device wifi list` | `nmcli` puede usar caché; no expone WPS ni RSSI en dBm en este listado. |
 | Monitor dedicada | Captura pasiva de beacons/probe responses con `tcpdump`, recorriendo frecuencias admitidas | Requiere root, canal inicial y radio sin otras interfaces. Restaura la frecuencia al terminar o cancelar. |
+| Windows managed | Native Wi-Fi: `WlanScan` + `WlanGetNetworkBssList` | Puede requerir permiso de ubicación; WPS/seguridad según los IE disponibles. |
 
 La tabla muestra ID, SSID, BSSID, canal, seguridad, WPS, señal y evaluación. Un SSID con varios BSSID conserva una fila por punto de acceso. WPA/WPA2/WPA3, PSK/SAE, modos mixtos, OWE y redes abiertas se presentan cuando existe evidencia del backend. Si el AKM no es reconocible, se conserva la incertidumbre. El porcentaje de NetworkManager se muestra como porcentaje, nunca se transforma en dBm.
 
@@ -81,7 +130,7 @@ sudo ip link set dev wlan1 up
 sudo nmcli device set wlan1 managed yes
 ```
 
-La aplicación rechaza cambios de canal/pruebas cuando otra interfaz comparte el mismo PHY, aunque parezca desconectada. No cambia automáticamente el dominio regulatorio ni intenta usar canales deshabilitados. Para fingerprint activo también rechaza canales no IR/DFS y 6 GHz, que el adaptador de este detector no maneja sin ambigüedad. El descubrimiento puede listar 6 GHz si el hardware lo expone.
+En Linux, la aplicación rechaza cambios de canal/pruebas cuando otra interfaz comparte el mismo PHY, aunque parezca desconectada. No cambia automáticamente el dominio regulatorio ni intenta usar canales deshabilitados. Para fingerprint activo también rechaza canales no IR/DFS y 6 GHz, que el adaptador de este detector no maneja sin ambigüedad. En Windows exige un adaptador desconectado, monitor previamente preparado y canal coincidente, sin cambiar la radio desde el programa. El descubrimiento puede listar 6 GHz si el hardware lo expone.
 
 ### Evaluación WPSplinter
 
@@ -117,6 +166,7 @@ reports/
     scan_*.xml, scan_*.log, scan_*_status.json, results.json
   wireless/<fecha_UTC_microsegundos_id>/
     report.json, discovery.json, iw_scan.log o nmcli_scan.log
+    windows_bss.bin, windows_discovery.json  # descubrimiento nativo Windows
     discovery_*MHz.pcap y .log          # si se captura en monitor
     upstream_result.json, fingerprint.pcap  # si se generan durante la prueba
 ```
@@ -133,8 +183,10 @@ Los informes incluyen versión, hora UTC, objetivo, autorización, fuentes, clas
 
 Las pruebas sin hardware cubren menú y perfil, descubrimiento LAN combinado, selección/local/Apple, identificación, servicios/CVE, modos, interfaces, WPA/WPA2/WPA3, escapes de SSID, selección/autorización, decisiones **del código upstream real con respuestas simuladas**, bloqueo de desautenticación/otro BSSID, JSON/PCAP y cancelación. Las capturas y salidas de red de los tests son fixtures sintéticos, no mediciones de redes reales.
 
-Si Nmap está instalado, una prueba adicional arranca un servidor HTTP temporal en **127.0.0.1** y lo inspecciona con Nmap real. GitHub Actions instala Nmap en Linux y ejecuta la suite con Python 3.11 y 3.13. Esta prueba no equivale a validar el escaneo de 65535 puertos, ARP, huellas de SO ni NSE de vulnerabilidades sobre equipos reales.
+Si Nmap está instalado, una prueba adicional arranca un servidor HTTP temporal en **127.0.0.1** y lo inspecciona con Nmap real. GitHub Actions ejecuta la suite en **Linux y Windows**, con Python 3.11 y 3.13, e instala Nmap para el test local en Linux. Esta prueba no equivale a validar el escaneo de 65535 puertos, ARP, huellas de SO ni NSE de vulnerabilidades sobre equipos reales.
 
-Pendiente de validación física: recepción/inyección 802.11, regulación y restauración de canal en cada controlador, descubrimiento RF y fingerprint de un AP autorizado. Los tests no necesitan ni transmiten tráfico Wi-Fi.
+Los tests de Windows cubren estructuras/offsets de Native Wi-Fi, BSSID múltiples, WPS real en IE sintéticos, WPA/RSN, errores de ubicación/servicio, notificaciones, caché, memoria nativa, conservación de evidencias y adaptación a Npcap. El descubrimiento Native Wi-Fi se ha comprobado además con un adaptador MediaTek MT7921 en Windows. El intercambio WPS activo de Windows está validado con mocks; requiere una prueba física con Npcap y hardware compatible.
+
+Pendiente de validación física: recepción/inyección monitor, regulación y restauración de canal en cada controlador Linux, y fingerprint de un AP autorizado en ambas plataformas. Los tests automatizados no necesitan ni transmiten tráfico Wi-Fi.
 
 Documentación de referencia: [iw](https://wireless.docs.kernel.org/en/latest/en/users/documentation/iw.html), [nmcli](https://networkmanager.dev/docs/api/latest/nmcli.html) y [salida de Nmap](https://nmap.org/book/man-output.html).

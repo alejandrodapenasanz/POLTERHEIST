@@ -25,3 +25,19 @@ jobs:
           ruff format --check script.py POLTERHEIST.py tests
       - name: Offline regressions and loopback Nmap integration
         run: python -m unittest discover -s tests -v
+  kali:
+    runs-on: ubuntu-latest
+    container: kalilinux/kali-rolling
+    timeout-minutes: 15
+    steps:
+      - name: Bootstrap Python and checkout dependencies
+        run: apt-get update && apt-get install -y python3 git ca-certificates
+      - uses: actions/checkout@v4
+      - name: Install through POLTERHEIST setup
+        run: python3 script.py --setup
+      - name: Verify Kali detection and dependencies
+        run: |
+          .venv/bin/python -c "import script; assert script.operating_system()['id'] == 'kali'; script.require_tools('iw', 'ip', 'nmcli', 'tcpdump', 'nmap'); script.load_upstream()"
+          .venv/bin/python script.py --check
+      - name: Offline regressions on Kali
+        run: .venv/bin/python -m unittest discover -s tests -v

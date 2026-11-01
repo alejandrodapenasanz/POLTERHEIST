@@ -93,6 +93,9 @@ def host(index, ip=None, local=False, vendor="Unknown"):
 
 class QuietTest(unittest.TestCase):
     def setUp(self):
+        root = patch.object(app.os, "geteuid", return_value=0, create=True)
+        root.start()
+        self.addCleanup(root.stop)
         self.output = io.StringIO()
         self.capture = contextlib.redirect_stdout(self.output)
         self.capture.__enter__()
@@ -497,7 +500,7 @@ class UpstreamIntegrationTests(QuietTest):
                 app.observe_selected(self.up, iface, ap, writer, seconds=0)
         writer.write.assert_not_called()
 
-    def test_wireless_workflow_saves_denied_authorization_without_probe(self):
+    def test_wireless_workflow_without_connected_scope_never_probes(self):
         iface = app.parse_iw_interfaces(IW_DEV)[1]
         iface.update(driver="fixture", connected=False)
         aps = app.parse_iw_scan(IW_SCAN)
@@ -514,11 +517,12 @@ class UpstreamIntegrationTests(QuietTest):
         report = json.loads((self.folder / "report.json").read_text())
         self.assertEqual(report["assessment"], "NOT_TESTED")
         self.assertFalse(report["authorization"]["granted"])
-        self.assertEqual(report["selected_target"]["bssid"], aps[0]["bssid"])
+        self.assertIsNone(report["selected_target"])
 
     def test_wireless_workflow_preserves_upstream_assessment_in_table_and_report(self):
         iface = app.parse_iw_interfaces(IW_DEV)[1]
-        iface.update(driver="fixture", connected=False)
+        iface.update(driver="fixture", connected=True, connected_ssid="LAB-WIFI")
+        iface["capabilities"], iface["frequencies"] = app.parse_phy(PHY)
         for response, broadcom, expected in [
             (self.up.ResponseKind.REJECTED, True, "LIKELY_VULNERABLE"),
             (self.up.ResponseKind.ACK, True, "PATCHED_HOSTAPD"),
@@ -526,6 +530,8 @@ class UpstreamIntegrationTests(QuietTest):
             (self.up.ResponseKind.SILENCE, True, "INCONCLUSIVE"),
         ]:
             with self.subTest(assessment=expected):
+                folder = self.folder / expected
+                folder.mkdir()
                 aps = app.parse_iw_scan(IW_SCAN)
                 aps[0]["ssid"] = aps[1]["ssid"]  # Same SSID must not share a verdict.
                 observation = self.up.Observation(
@@ -541,8 +547,8 @@ class UpstreamIntegrationTests(QuietTest):
                     response, False, None
                 )
                 detected = self.up.fingerprint_target(observation, backend)
-                raw_path = self.folder / "upstream_result.json"
-                self.up.write_result_json(detected, raw_path, self.folder / "unused.pcap")
+                raw_path = folder / "upstream_result.json"
+                self.up.write_result_json(detected, raw_path, folder / "unused.pcap")
                 original_bytes = raw_path.read_bytes()
                 original = json.loads(original_bytes)
                 outcome = {
@@ -555,17 +561,17 @@ class UpstreamIntegrationTests(QuietTest):
                 with (
                     patch.object(app, "require_linux"),
                     patch.object(app, "detect_wireless_interfaces", return_value=[iface]),
-                    patch.object(app, "report_folder", return_value=self.folder),
+                    patch.object(app, "report_folder", return_value=folder),
                     patch.object(app, "discover_wifi", return_value=aps),
                     patch.object(app, "fingerprint_selected", return_value=outcome) as fingerprint,
                     patch("builtins.input", side_effect=["2", "AUTORIZO " + aps[1]["bssid"]]),
                     contextlib.redirect_stdout(output),
                 ):
-                    app.wireless_recon()
+                    app.wireless_recon(bssid=aps[1]["bssid"])
                 fingerprint.assert_called_once()
                 self.assertEqual(fingerprint.call_args.args[0]["bssid"], aps[1]["bssid"])
-                report = json.loads((self.folder / "report.json").read_text(encoding="utf-8"))
-                summary = json.loads((self.folder / "fingerprint.json").read_text(encoding="utf-8"))
+                report = json.loads((folder / "report.json").read_text(encoding="utf-8"))
+                summary = json.loads((folder / "fingerprint.json").read_text(encoding="utf-8"))
                 for actual in [
                     report["assessment"],
                     report["selected_target"]["assessment"],
@@ -578,12 +584,12 @@ class UpstreamIntegrationTests(QuietTest):
                     [a["assessment"] for a in report["access_points"]],
                     ["NOT_TESTED", expected, "NOT_TESTED"],
                 )
-                _, before, after = output.getvalue().split("POLTERHEIST :: WIRELESS RESULTS")
+                _, after = output.getvalue().split("POLTERHEIST :: WIRELESS RESULTS")
                 self.assertNotIn("WIRELESS DISCOVERY", output.getvalue())
                 self.assertNotIn("[2] " + aps[1]["bssid"], output.getvalue())
                 self.assertNotIn("POLTERHEIST :: WPS FINGERPRINT", output.getvalue())
                 for ap, assessment in zip(aps, ["NOT_TESTED", expected, "NOT_TESTED"]):
-                    for section, status in [(before, "NOT_TESTED"), (after, assessment)]:
+                    for section, status in [(after, assessment)]:
                         rows = [
                             line
                             for line in section.splitlines()
@@ -716,7 +722,9 @@ class UpstreamIntegrationTests(QuietTest):
             ),
             patch.object(self.up, "fingerprint_target", return_value=result),
         ):
-            outcome = app.fingerprint_selected(ap, iface, [iface], self.folder, authorized=True)
+            outcome = app.fingerprint_linux_monitor(
+                ap, iface, [iface], self.folder, authorized=True
+            )
         self.assertEqual(outcome["classification"], "LIKELY_VULNERABLE")
         raw = (self.folder / "upstream_result.json").read_bytes()
         app.write_wireless_report(self.folder, {"original_fingerprint": outcome["original"]})
@@ -736,7 +744,9 @@ class UpstreamIntegrationTests(QuietTest):
             patch.object(app, "set_frequency") as tune,
             patch.object(app, "observe_selected", side_effect=KeyboardInterrupt),
         ):
-            outcome = app.fingerprint_selected(ap, iface, [iface], self.folder, authorized=True)
+            outcome = app.fingerprint_linux_monitor(
+                ap, iface, [iface], self.folder, authorized=True
+            )
         self.assertEqual(outcome["classification"], "INCONCLUSIVE")
         self.assertTrue((self.folder / "fingerprint.pcap").exists())
         self.assertEqual(tune.call_args.args, (iface["name"], 5180))
@@ -745,7 +755,9 @@ class UpstreamIntegrationTests(QuietTest):
         ap = dict(app.parse_iw_scan(IW_SCAN)[0], frequency_mhz=5955)
         iface = app.parse_iw_interfaces(IW_DEV)[1]
         with patch.object(app, "require_linux"), patch.object(app, "load_upstream") as load:
-            outcome = app.fingerprint_selected(ap, iface, [iface], self.folder, authorized=True)
+            outcome = app.fingerprint_linux_monitor(
+                ap, iface, [iface], self.folder, authorized=True
+            )
         self.assertEqual(outcome["classification"], "ERROR")
         load.assert_not_called()
 
@@ -772,7 +784,7 @@ class ProcessTests(QuietTest):
 
     def test_missing_binary_actionable_error(self):
         with patch.object(app.shutil, "which", return_value=None):
-            with self.assertRaisesRegex(RuntimeError, "nmap.*README"):
+            with self.assertRaisesRegex(RuntimeError, "nmap.*--setup"):
                 app.require_tools("nmap")
 
 

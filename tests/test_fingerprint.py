@@ -149,10 +149,12 @@ class FingerprintTests(unittest.TestCase):
             "driver": "fixture",
             "capabilities": [],
             "connected": True,
+            "connected_ssid": "Lab",
             "backend": "windows",
         }
         output = io.StringIO()
         with (
+            patch.object(app.sys, "platform", "win32"),
             patch.object(app, "require_linux"),
             patch.object(app, "detect_wireless_interfaces", return_value=[iface]),
             patch.object(app, "report_folder", return_value=self.folder),
@@ -167,7 +169,7 @@ class FingerprintTests(unittest.TestCase):
         report = json.loads((self.folder / "report.json").read_text(encoding="utf-8"))
         self.assertEqual(report["assessment"], "NOT_TESTED")
         self.assertIn("Falta Npcap", report["fingerprint"]["reason"])
-        self.assertIn("NOT_TESTED: Falta Npcap", output.getvalue())
+        self.assertIn("Falta Npcap", output.getvalue())
         self.assertEqual(output.getvalue().count("WIRELESS RESULTS"), 1)
         self.assertNotIn("[1] " + self.ap["bssid"], output.getvalue())
         self.assertTrue((self.folder / "fingerprint.json").is_file())

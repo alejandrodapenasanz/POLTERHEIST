@@ -10,6 +10,7 @@ import importlib.util
 import ipaddress
 import json
 import os
+import platform
 import re
 import shutil
 import signal
@@ -22,7 +23,7 @@ import xml.etree.ElementTree as ET
 from contextlib import contextmanager
 from pathlib import Path
 
-VERSION = "2.3.0"
+VERSION = "2.4.0"
 BASE = Path(__file__).resolve().parent
 PROFILE_PATH = BASE / "config" / "profile.json"
 REPORTS = BASE / "reports"
@@ -215,8 +216,79 @@ def require_tools(*names):
     missing = [name for name in names if not shutil.which(name)]
     if missing:
         raise RuntimeError(
-            "Falta: " + ", ".join(missing) + ". Consulta los paquetes Kali del README."
+            "Falta: " + ", ".join(missing) + ". Ejecuta python3 script.py --setup en Kali/Linux."
         )
+
+
+def operating_system():
+    if sys.platform == "win32":
+        return {"id": "windows", "name": "Windows", "family": "windows"}
+    if sys.platform.startswith("linux"):
+        try:
+            release = platform.freedesktop_os_release()
+        except OSError:
+            release = {}
+        return {
+            "id": release.get("ID", "linux"),
+            "name": release.get("PRETTY_NAME", "Linux"),
+            "family": "linux",
+            "like": release.get("ID_LIKE", ""),
+        }
+    return {"id": sys.platform, "name": platform.system(), "family": "unsupported"}
+
+
+def setup_environment():
+    system = operating_system()
+    print("  Preparando POLTERHEIST para " + system["name"])
+    if system["family"] == "linux":
+        if not shutil.which("apt-get"):
+            raise RuntimeError("La instalación automática Linux requiere APT (Kali/Debian/Ubuntu).")
+        prefix = [] if os.geteuid() == 0 else ["sudo", "--"]
+        if prefix:
+            require_tools("sudo")
+        packages = [
+            "python3-venv",
+            "python3-pip",
+            "iw",
+            "iproute2",
+            "tcpdump",
+            "network-manager",
+            "nmap",
+            "arp-scan",
+        ]
+        if system["id"] == "kali":
+            packages.append("firmware-mediatek")
+        subprocess.run(prefix + ["apt-get", "update"], check=True)
+        subprocess.run(prefix + ["apt-get", "install", "-y", *packages], check=True)
+    elif system["family"] != "windows":
+        raise RuntimeError("Sistema compatible: Kali/Linux o Windows.")
+    environment = BASE / ".venv"
+    python = environment / ("Scripts/python.exe" if system["family"] == "windows" else "bin/python")
+    # A checkout copied between operating systems may contain an incompatible venv.
+    other = environment / ("bin/python" if system["family"] == "windows" else "Scripts/python.exe")
+    if other.exists() and not python.exists():
+        environment = BASE / (".venv-windows" if system["family"] == "windows" else ".venv-linux")
+        python = environment / (
+            "Scripts/python.exe" if system["family"] == "windows" else "bin/python"
+        )
+    if not python.exists():
+        subprocess.run([sys.executable, "-m", "venv", str(environment)], check=True)
+    subprocess.run(
+        [str(python), "-m", "pip", "install", "-r", str(BASE / "requirements.txt")], check=True
+    )
+    print("  Preparado. Ejecuta: " + str(python) + " script.py --wireless")
+    return 0
+
+
+def linux_elevated_wireless(ssid=None, bssid=None):
+    require_tools("sudo")
+    args = ["sudo", "--", sys.executable, str(BASE / "script.py"), "--wireless"]
+    if ssid is not None:
+        args.extend(["--ssid", ssid])
+    if bssid is not None:
+        args.extend(["--bssid", bssid])
+    print("  Linux solicitará permisos sudo para preparar y restaurar el adaptador.")
+    return subprocess.run(args, check=False).returncode
 
 
 def utc_now():
@@ -1064,7 +1136,7 @@ class WindowsWlan:
         self.dll.WlanCloseHandle(self.handle, None)
         self._scan_callback = None
 
-    def connected_profile(self, guid):
+    def connected_profile(self, guid, ssid_only=False):
         """Read only the profile name/state, never profile XML or credentials."""
         native_guid = WinGUID.from_text(guid)
         ptr, size, kind = ctypes.c_void_p(), ctypes.c_uint32(), ctypes.c_uint32()
@@ -1081,11 +1153,17 @@ class WindowsWlan:
             return None
         self.check(code, "WlanQueryInterface/current_connection")
         try:
-            if not ptr.value or size.value < 520:
+            required = 556 if ssid_only else 520
+            if not ptr.value or size.value < required:
                 raise ValueError("Datos de conexión WLAN truncados")
-            header = ctypes.string_at(ptr, 520)
+            header = ctypes.string_at(ptr, required)
             if int.from_bytes(header[:4], "little") != 1:
                 return None
+            if ssid_only:
+                length = int.from_bytes(header[520:524], "little")
+                if not 1 <= length <= 32:
+                    raise ValueError("SSID de conexión no válido")
+                return header[524 : 524 + length].decode("utf-8")
             profile = header[8:520].decode("utf-16-le").split("\0")[0]
             if not profile:
                 raise RuntimeError(
@@ -1217,6 +1295,12 @@ def wlan_helper(guid, setting, value=None):
 def detect_windows_interfaces():
     with WindowsWlan() as wlan:
         interfaces = wlan.interfaces()
+        for iface in interfaces:
+            if iface.get("connected"):
+                try:
+                    iface["connected_ssid"] = wlan.connected_profile(iface["guid"], ssid_only=True)
+                except (RuntimeError, ValueError, UnicodeError) as error:
+                    iface["connection_note"] = str(error)
     for iface in interfaces:
         if not wlan_helper_path():
             iface["monitor_note"] = (
@@ -1265,6 +1349,9 @@ def parse_iw_interfaces(output):
         match = re.match(r"\s*phy#(\d+)", line)
         if match:
             phy = "phy" + match.group(1)
+            current = None
+        if "Unnamed/non-netdev interface" in line:
+            current = None
         match = re.match(r"\s*Interface\s+(\S+)", line)
         if match:
             current = {
@@ -1338,7 +1425,20 @@ def detect_wireless_interfaces():
         iface["driver"] = driver.resolve().name if driver.exists() else "Unknown"
         link = run_quiet(["iw", "dev", iface["name"], "link"], timeout=10)
         iface["connected"] = bool(link and link.returncode == 0 and "Connected to " in link.stdout)
+        iface["backend"] = "linux"
+        if iface["connected"]:
+            ssid = re.search(r"^\s*SSID: (.*)$", link.stdout, re.M)
+            if ssid:
+                iface["connected_ssid"] = decode_iw_ssid(ssid.group(1))
     return interfaces
+
+
+def decode_iw_ssid(value):
+    chunks = re.findall(r"\\x[0-9a-fA-F]{2}|.", value)
+    return b"".join(
+        bytes.fromhex(c[2:]) if re.fullmatch(r"\\x[0-9a-fA-F]{2}", c) else c.encode("utf-8")
+        for c in chunks
+    ).decode("utf-8", errors="replace")
 
 
 def require_isolated_monitor(iface, interfaces):
@@ -1357,6 +1457,199 @@ def require_isolated_monitor(iface, interfaces):
             + ", ".join(siblings)
             + ". Usa un adaptador dedicado para no alterar otras conexiones."
         )
+
+
+def linux_radio_candidate(interfaces, preferred, ap=None):
+    candidates = []
+    for iface in interfaces:
+        if iface.get("mode") not in {"managed", "monitor"} or "monitor" not in iface.get(
+            "capabilities", []
+        ):
+            continue
+        try:
+            require_isolated_monitor(dict(iface, mode="monitor"), interfaces)
+            if ap is not None:
+                validate_linux_target(ap, iface)
+        except (RuntimeError, ValueError):
+            continue
+        candidates.append(iface)
+    if not candidates:
+        raise RuntimeError(
+            "No hay una radio Linux compatible con monitor y el canal permitido del objetivo, sin interfaces compartidas. Revisa iw phy, regulación y controlador."
+        )
+    return min(
+        candidates, key=lambda i: (i.get("connected", False), i["name"] != preferred["name"])
+    )
+
+
+def linux_command(arguments, timeout=20):
+    result = run_quiet(arguments, timeout=timeout)
+    if result is None or result.returncode:
+        detail = (result.stderr or result.stdout).strip() if result is not None else "timeout"
+        raise RuntimeError(f"{arguments[0]}: {safe_text(detail)}")
+    return result.stdout.strip()
+
+
+def linux_nm_state(name):
+    result = run_quiet(
+        ["nmcli", "-g", "GENERAL.NM-MANAGED,GENERAL.CON-UUID", "device", "show", name], timeout=10
+    )
+    if result is None or result.returncode:
+        return None, None
+    fields = result.stdout.splitlines()
+    if not fields or fields[0] not in {"yes", "no"}:
+        raise RuntimeError("NetworkManager no devolvió un estado interpretable.")
+    connection = fields[1].strip() if len(fields) > 1 else ""
+    connection = str(uuid.UUID(connection)) if connection not in {"", "--"} else None
+    return fields[0] == "yes", connection
+
+
+def validate_linux_target(ap, iface):
+    if not MAC.fullmatch(ap["bssid"]):
+        raise ValueError("BSSID no válido")
+    if not ap["ssid"] or len(ap["ssid"].encode("utf-8")) > 32:
+        raise ValueError("SSID oculto/no válido; se necesita el SSID exacto")
+    frequency = ap.get("frequency_mhz")
+    if (
+        frequency is None
+        or frequency >= 5925
+        or not ap.get("channel")
+        or frequency_channel(frequency) != ap["channel"]
+    ):
+        raise RuntimeError(
+            "El detector requiere canal/frecuencia coherentes en 2.4/5 GHz; 6 GHz no está soportado."
+        )
+    supported = next((f for f in iface["frequencies"] if f["frequency_mhz"] == frequency), None)
+    if not supported or supported["disabled"] or supported["no_ir"] or supported["radar"]:
+        raise RuntimeError(
+            "El canal no admite esta prueba activa según capacidades/regulación (disabled/no IR/DFS)."
+        )
+
+
+@contextmanager
+def prepared_linux_monitor(ap, iface, interfaces, folder, state):
+    require_linux(root=True)
+    require_tools("iw", "ip", "nmcli")
+    validate_linux_target(ap, iface)
+    require_isolated_monitor(dict(iface, mode="monitor"), interfaces)
+    if iface["mode"] not in {"managed", "monitor"}:
+        raise RuntimeError("Modo original de interfaz no compatible con la restauración.")
+    name = iface["name"]
+    links = json.loads(linux_command(["ip", "-json", "link", "show", "dev", name]))
+    if len(links) != 1 or links[0].get("ifname") != name:
+        raise RuntimeError("No se puede guardar el estado original del adaptador.")
+    was_up = "UP" in links[0].get("flags", [])
+    managed, connection = linux_nm_state(name)
+    if iface.get("connected") and (not managed or not connection):
+        raise RuntimeError(
+            "La conexión de esta radio no está controlada por NetworkManager; no se puede restaurar automáticamente."
+        )
+    if iface["mode"] == "monitor" and not iface.get("frequency_mhz"):
+        raise RuntimeError("No se conoce la frecuencia del monitor original para restaurarla.")
+    state.update(
+        interface=name,
+        original_mode=iface["mode"],
+        original_frequency=iface.get("frequency_mhz"),
+        original_up=was_up,
+        nm_managed=managed,
+        connection_uuid=connection,
+        restored=None,
+    )
+    dump_json(folder / "radio_setup.json", state)
+    nm_changed = radio_changed = False
+    try:
+        if managed:
+            nm_changed = True
+            linux_command(["nmcli", "device", "set", name, "managed", "no"])
+        radio_changed = True
+        linux_command(["ip", "link", "set", "dev", name, "down"])
+        if iface["mode"] == "managed":
+            linux_command(["iw", "dev", name, "set", "monitor", "otherbss", "control"])
+        linux_command(["ip", "link", "set", "dev", name, "up"])
+        set_frequency(name, ap["frequency_mhz"])
+        live = detect_wireless_interfaces()
+        ready = next((i for i in live if i["name"] == name and i["phy"] == iface["phy"]), None)
+        if (
+            ready is None
+            or ready["mode"] != "monitor"
+            or ready["frequency_mhz"] != ap["frequency_mhz"]
+        ):
+            raise RuntimeError(
+                "El controlador no confirmó modo monitor y frecuencia tras la preparación."
+            )
+        require_isolated_monitor(ready, live)
+        state["prepared"] = True
+        dump_json(folder / "radio_setup.json", state)
+        yield ready, live
+    finally:
+        errors = []
+
+        def restore(action):
+            try:
+                action()
+            except (Exception, KeyboardInterrupt) as error:
+                errors.append(str(error) or "Restauración interrumpida")
+
+        if radio_changed:
+            restore(lambda: linux_command(["ip", "link", "set", "dev", name, "down"]))
+            restore(lambda: linux_command(["iw", "dev", name, "set", "type", iface["mode"]]))
+            if was_up:
+                restore(lambda: linux_command(["ip", "link", "set", "dev", name, "up"]))
+            if iface["mode"] == "monitor":
+                restore(lambda: set_frequency(name, iface["frequency_mhz"]))
+        if nm_changed:
+            restore(lambda: linux_command(["nmcli", "device", "set", name, "managed", "yes"]))
+            if connection:
+                restore(
+                    lambda: linux_command(
+                        [
+                            "nmcli",
+                            "--wait",
+                            "20",
+                            "connection",
+                            "up",
+                            "uuid",
+                            connection,
+                            "ifname",
+                            name,
+                        ],
+                        timeout=25,
+                    )
+                )
+                if not errors:
+                    restore(lambda: verify_linux_connection(name, connection))
+        if radio_changed and not errors:
+            restore(
+                lambda: verify_linux_radio(
+                    name,
+                    iface["mode"],
+                    was_up,
+                    iface.get("frequency_mhz") if iface["mode"] == "monitor" else None,
+                )
+            )
+        state["restored"] = not errors
+        if errors:
+            state["restore_error"] = "; ".join(errors)
+        dump_json(folder / "radio_setup.json", state)
+
+
+def verify_linux_connection(name, connection):
+    managed, active = linux_nm_state(name)
+    if not managed or active != connection:
+        raise RuntimeError("NetworkManager no confirmó la conexión original restaurada.")
+
+
+def verify_linux_radio(name, mode, was_up, frequency=None):
+    current = next((i for i in detect_wireless_interfaces() if i["name"] == name), None)
+    link = json.loads(linux_command(["ip", "-json", "link", "show", "dev", name]))
+    if (
+        current is None
+        or current["mode"] != mode
+        or len(link) != 1
+        or ("UP" in link[0].get("flags", [])) != was_up
+        or (frequency is not None and current["frequency_mhz"] != frequency)
+    ):
+        raise RuntimeError("Linux no confirmó el modo/estado original del adaptador.")
 
 
 def frequency_channel(frequency):
@@ -2074,7 +2367,7 @@ class WinShellExecuteInfo(ctypes.Structure):
     ]
 
 
-def windows_elevated_wireless():
+def windows_elevated_wireless(ssid=None, bssid=None):
     """Use the normal Windows UAC prompt and keep the interactive result window open."""
     shell = ctypes.WinDLL("shell32.dll", use_last_error=True, winmode=0x800)
     kernel = ctypes.WinDLL("kernel32.dll", use_last_error=True, winmode=0x800)
@@ -2086,6 +2379,11 @@ def windows_elevated_wireless():
     kernel.GetExitCodeProcess.restype = ctypes.c_int32
     kernel.CloseHandle.argtypes = [ctypes.c_void_p]
     kernel.CloseHandle.restype = ctypes.c_int32
+    arguments = [str(BASE / "script.py"), "--wireless", "--windows-elevated"]
+    if ssid is not None:
+        arguments.extend(["--ssid", ssid])
+    if bssid is not None:
+        arguments.extend(["--bssid", bssid])
     request = WinShellExecuteInfo(
         size=ctypes.sizeof(WinShellExecuteInfo),
         mask=0x40 | 0x100,
@@ -2093,9 +2391,7 @@ def windows_elevated_wireless():
         file=sys.executable,
         directory=str(BASE),
         show=1,
-        parameters=subprocess.list2cmdline(
-            [str(BASE / "script.py"), "--wireless", "--windows-elevated"]
-        ),
+        parameters=subprocess.list2cmdline(arguments),
     )
     print(
         "  Windows solicitará permisos de administrador para preparar el Wi-Fi; continúa en esa ventana."
@@ -2377,6 +2673,35 @@ def fingerprint_selected(ap, iface, interfaces, folder, authorized=False):
         "upstream_commit": UPSTREAM_COMMIT,
         "authorized": bool(authorized),
     }
+    state = {}
+    prepared = False
+    if not authorized:
+        return result
+    try:
+        load_upstream()
+        with prepared_linux_monitor(ap, iface, interfaces, folder, state) as (ready, live):
+            prepared = True
+            result = fingerprint_linux_monitor(ap, ready, live, folder, authorized=True)
+    except (KeyboardInterrupt, EOFError):
+        result.update(classification="INCONCLUSIVE", error="Interrumpido por el operador")
+    except Exception as error:
+        result["classification"] = "ERROR" if prepared else "NOT_TESTED"
+        result["error"] = f"{type(error).__name__}: {error}"
+    result["radio_setup"] = state
+    if state.get("restore_error"):
+        result["limitations"].append("No se pudo restaurar el Wi-Fi: " + state["restore_error"])
+    return result
+
+
+def fingerprint_linux_monitor(ap, iface, interfaces, folder, authorized=False):
+    result = {
+        "classification": "NOT_TESTED",
+        "original": None,
+        "error": None,
+        "limitations": [],
+        "upstream_commit": UPSTREAM_COMMIT,
+        "authorized": bool(authorized),
+    }
     if not authorized:
         return result
     state = None
@@ -2385,20 +2710,8 @@ def fingerprint_selected(ap, iface, interfaces, folder, authorized=False):
     try:
         require_linux(root=True)
         require_isolated_monitor(iface, interfaces)
-        if not MAC.fullmatch(ap["bssid"]):
-            raise ValueError("BSSID no válido")
-        if not ap["ssid"] or len(ap["ssid"].encode("utf-8")) > 32:
-            raise ValueError("SSID oculto/no válido; se necesita el SSID exacto")
+        validate_linux_target(ap, iface)
         frequency = ap.get("frequency_mhz")
-        if frequency is None or frequency >= 5925 or not ap.get("channel"):
-            raise RuntimeError(
-                "El detector fijado requiere un canal conocido en 2.4/5 GHz; 6 GHz no está soportado."
-            )
-        supported = next((f for f in iface["frequencies"] if f["frequency_mhz"] == frequency), None)
-        if not supported or supported["disabled"] or supported["no_ir"] or supported["radar"]:
-            raise RuntimeError(
-                "El canal no admite esta prueba activa según capacidades/regulación (disabled/no IR/DFS)."
-            )
         upstream = load_upstream()
         state = upstream.inspect_monitor_interface(iface["name"])
         if state.channel is None or not iface.get("frequency_mhz"):
@@ -2440,23 +2753,39 @@ def fingerprint_selected(ap, iface, interfaces, folder, authorized=False):
 def write_wireless_report(folder, report):
     report["updated_at"] = utc_now()
     artifacts = []
-    for path in sorted(folder.iterdir()):
-        if path.is_file() and path.name not in {"report.json", "report.json.tmp"}:
+    for path in sorted(folder.rglob("*")):
+        if path.is_file() and path != folder / "report.json" and not path.name.endswith(".tmp"):
             with path.open("rb") as source:
                 digest = hashlib.file_digest(source, "sha256").hexdigest()
-            artifacts.append({"path": path.name, "bytes": path.stat().st_size, "sha256": digest})
+            artifacts.append(
+                {
+                    "path": path.relative_to(folder).as_posix(),
+                    "bytes": path.stat().st_size,
+                    "sha256": digest,
+                }
+            )
     report["artifacts"] = artifacts
     dump_json(folder / "report.json", report)
 
 
-def wireless_recon():
-    if sys.platform != "win32":
+def wireless_recon(ssid=None, bssid=None):
+    system = operating_system()
+    if system["family"] == "unsupported":
+        raise RuntimeError("WIRELESS RECON requiere Kali/Linux o Windows.")
+    if system["family"] == "linux":
         require_linux()
+        if os.geteuid() != 0:
+            return linux_elevated_wireless(ssid, bssid)
+    if bssid is not None:
+        bssid = bssid.lower()
+        if not MAC.fullmatch(bssid):
+            raise ValueError("BSSID no válido")
+    if ssid is not None and (not ssid or len(ssid.encode("utf-8")) > 32):
+        raise ValueError("El SSID debe tener entre 1 y 32 bytes UTF-8.")
     interfaces = detect_wireless_interfaces()
     if not interfaces:
         raise RuntimeError(
-            "No hay interfaces Wi-Fi. Revisa la radio, WlanSvc (Windows), rfkill (Linux), firmware y controladores. "
-            "En VirtualBox necesitas USB Wi-Fi passthrough; Ethernet puenteada no captura 802.11."
+            "No hay interfaces Wi-Fi. En Kali Live comprueba firmware/rfkill; en una VM necesitas USB Wi-Fi passthrough. Ethernet virtual no permite esta prueba."
         )
     if (
         any(
@@ -2466,159 +2795,179 @@ def wireless_recon():
         )
         and not windows_is_admin()
     ):
-        return windows_elevated_wireless()
+        return windows_elevated_wireless(ssid, bssid)
+    connected = [i for i in interfaces if i.get("connected") and i.get("connected_ssid")]
     iface = (
-        interfaces[0]
+        connected[0]
+        if connected
+        else interfaces[0]
         if len(interfaces) == 1
-        else select_item(interfaces, "Interfaz para descubrimiento")
+        else select_item(interfaces, "Interfaz Wi-Fi")
     )
     if iface is None:
         return
+    explicit = ssid is not None
+    scope_ssid = ssid if explicit else iface.get("connected_ssid")
+    if scope_ssid is not None and not isinstance(scope_ssid, str):
+        raise ValueError("El controlador no devolvió un SSID de conexión válido.")
     folder = report_folder("wireless")
     report = {
         "tool": "POLTERHEIST",
         "version": VERSION,
+        "operating_system": system,
         "upstream_commit": UPSTREAM_COMMIT,
         "timestamp": utc_now(),
         "interfaces": interfaces,
         "discovery_interface": iface["name"],
         "access_points": [],
+        "targets": [],
         "selected_target": None,
         "assessment": "NOT_TESTED",
         "original_fingerprint": None,
-        "authorization": None,
-        "not_tested_reason": None,
+        "authorization": {
+            "granted": bool(scope_ssid),
+            "ssid": scope_ssid,
+            "bssid": bssid,
+            "source": "explicit_ssid" if explicit else "connected_network",
+            "timestamp": utc_now(),
+        },
         "status": "running",
         "technical_limitations": [],
-        "remediation": [
-            "Consultar actualizaciones del fabricante/ISP para el modelo y firmware exactos.",
-            "Desactivar WPS si no es necesario y confirmar la mitigación con el fabricante.",
-            "Sustituir equipos sin soporte si no existe una corrección.",
-            "El fingerprint no confirma ejecución de código ni una vulnerabilidad explotable.",
-        ],
+        "not_tested_reason": None,
     }
     write_wireless_report(folder, report)
     try:
         aps = discover_wifi(iface, interfaces, folder, report["technical_limitations"])
         report["access_points"] = aps
         dump_json(folder / "discovery.json", aps)
-        show_wifi(aps)
+        targets = [
+            ap
+            for ap in aps
+            if scope_ssid and ap["ssid"] == scope_ssid and (bssid is None or ap["bssid"] == bssid)
+        ]
+        report["selected_targets"] = [dict(ap) for ap in targets]
         report["status"] = "discovered"
         write_wireless_report(folder, report)
-        if not aps:
-            print("  Sin AP observados. Revisa antena, banda, canal, rfkill y permisos.")
-            return
-        target = select_item(aps, "ID de tu red para evaluar WPS", "bssid", show_items=False)
-        if target is None:
-            return
-        report["selected_target"] = dict(target)
-        report["not_tested_reason"] = "No se ha iniciado la preparación del adaptador."
-        write_wireless_report(folder, report)
-        if iface.get("backend") == "windows" and not wlan_helper_path():
+        if not scope_ssid:
             report["not_tested_reason"] = (
-                "Falta Npcap. Instálalo desde https://npcap.com/#download con "
-                "Support raw 802.11 traffic (and monitor mode) "
-                "para que POLTERHEIST pueda preparar automáticamente el adaptador."
+                "No hay una red conectada. Conéctate a tu Wi-Fi o indica su nombre con --ssid."
             )
-            report["technical_limitations"].append(report["not_tested_reason"])
             return
-        # Re-read immediately before authorization: never trust stale radio topology.
-        current = detect_wireless_interfaces()
-        if iface.get("backend") == "windows":
+        if not targets:
+            report["not_tested_reason"] = (
+                "No se observó el SSID/BSSID autorizado en el descubrimiento."
+            )
+            return
+        print(
+            "  Fingerprint de "
+            + safe_text(repr(scope_ssid))
+            + f": {len(targets)} BSSID. Preparación y restauración automáticas."
+        )
+        for index, target in enumerate(targets, 1):
+            target_folder = folder / "targets" / target["bssid"].replace(":", "")
+            target_folder.mkdir(parents=True, exist_ok=False)
+            target_report = {
+                "selected_target": dict(target),
+                "access_points": [target],
+                "assessment": "NOT_TESTED",
+                "original_fingerprint": None,
+                "authorization": dict(report["authorization"], bssid=target["bssid"]),
+                "technical_limitations": [],
+                "status": "preparing",
+            }
+            outcome = {
+                "classification": "NOT_TESTED",
+                "original": None,
+                "error": None,
+                "limitations": [],
+            }
             try:
-                validate_windows_target(target)
-                monitor = windows_monitor_candidate(current, iface)
-            except (RuntimeError, ValueError) as error:
-                report["not_tested_reason"] = str(error)
-                return
-            if monitor.get("connected"):
-                print(
-                    "  La preparación automática pausará la conexión de este adaptador durante la prueba y la restaurará al terminar."
+                current = detect_wireless_interfaces()
+                if iface.get("backend") == "windows":
+                    if not wlan_helper_path():
+                        raise RuntimeError("Falta Npcap con soporte raw 802.11.")
+                    validate_windows_target(target)
+                    radio = windows_monitor_candidate(current, iface)
+                else:
+                    radio = linux_radio_candidate(current, iface, target)
+                target_report["fingerprint_interface"] = radio["name"]
+                target_report["assessment"] = target["assessment"] = "INCONCLUSIVE"
+                target_report["status"] = "fingerprinting"
+                write_wireless_report(target_folder, target_report)
+                print(f"  Evaluando {index}/{len(targets)}: ID {target['id']}")
+                outcome = fingerprint_selected(
+                    target, radio, current, target_folder, authorized=True
                 )
+            except (KeyboardInterrupt, EOFError):
+                outcome.update(classification="INCONCLUSIVE", error="Interrumpido por el operador")
+            except (RuntimeError, ValueError, OSError) as error:
+                outcome["error"] = str(error)
+            target_report.update(
+                assessment=outcome["classification"],
+                original_fingerprint=outcome["original"],
+                error=outcome["error"],
+                technical_limitations=outcome["limitations"],
+                radio_setup=outcome.get("radio_setup"),
+                status="assessed",
+            )
+            summary = save_fingerprint_summary(target_folder, target_report)
+            write_wireless_report(target_folder, target_report)
+            report["targets"].append(
+                {
+                    "target": dict(target),
+                    "assessment": summary["assessment"],
+                    "fingerprint": summary,
+                    "evidence_directory": target_folder.relative_to(folder).as_posix(),
+                    "radio_setup": outcome.get("radio_setup"),
+                }
+            )
+            if len(targets) == 1:
+                report.update(
+                    selected_target=dict(target),
+                    assessment=summary["assessment"],
+                    original_fingerprint=outcome["original"],
+                    fingerprint=summary,
+                    radio_setup=outcome.get("radio_setup"),
+                )
+                dump_json(folder / "fingerprint.json", summary)
+            else:
+                report["assessment"] = None
+            write_wireless_report(folder, report)
+            radio_state = outcome.get("radio_setup") or {}
+            if outcome["error"] == "Interrumpido por el operador" or radio_state.get(
+                "restore_error"
+            ):
+                report["status"] = (
+                    "cancelled" if not radio_state.get("restore_error") else "restore_failed"
+                )
+                break
         else:
-            monitors = [i for i in current if i["mode"] == "monitor"]
-            if not monitors:
-                report["not_tested_reason"] = (
-                    "No hay interfaz monitor Linux disponible; consulta la configuración de iw en el README."
-                )
-                return
-            monitor = (
-                monitors[0]
-                if len(monitors) == 1
-                else select_item(monitors, "Interfaz monitor para el detector")
-            )
-        if monitor is None:
-            return
-        if monitor.get("backend") != "windows":
-            require_isolated_monitor(monitor, current)
-        authorized = authorize_target(target)
-        report["authorization"] = {
-            "granted": authorized,
-            "ssid": target["ssid"],
-            "bssid": target["bssid"],
-            "timestamp": utc_now(),
-        }
-        report["fingerprint_interface"] = monitor["name"]
-        write_wireless_report(folder, report)
-        if not authorized:
-            report["not_tested_reason"] = (
-                "El objetivo no fue autorizado; no se enviaron pruebas WPS."
-            )
-            report["technical_limitations"].append("NOT_TESTED: el operador no autorizó el BSSID.")
-            return
-        report["not_tested_reason"] = None
-        report["assessment"] = "INCONCLUSIVE"
-        report["status"] = "fingerprinting"
-        write_wireless_report(folder, report)
-        outcome = fingerprint_selected(target, monitor, current, folder, authorized=True)
-        target["assessment"] = outcome["classification"]
-        report["selected_target"] = dict(target)
-        report["assessment"] = outcome["classification"]
-        report["original_fingerprint"] = outcome["original"]
-        report["error"] = outcome["error"]
-        report["radio_setup"] = outcome.get("radio_setup")
-        report["technical_limitations"].extend(outcome["limitations"])
-        report["status"] = "assessed"
-        if (
-            isinstance(outcome["original"], dict)
-            and assessment_from_upstream(outcome["original"], target) != "ERROR"
-        ):
-            identity = outcome["original"].get("target", {}).get("wps_identity", {})
-            report["manufacturer_evidence"] = target["manufacturer_evidence"] + [
-                {"source": "upstream WPS identity", "value": identity}
-            ]
+            report["status"] = "completed"
     except (KeyboardInterrupt, EOFError):
         report["status"] = "cancelled"
-        report["not_tested_reason"] = (
-            "Interrumpido por el operador antes de completar la evaluación."
-        )
-        print("\n  Cancelado; se conservan las evidencias disponibles.")
+        report["not_tested_reason"] = "Interrumpido por el operador; se conservan las evidencias."
     except Exception as error:
-        if report["status"] == "fingerprinting":
-            report["assessment"] = "ERROR"
         report.update(status="error", error=str(error))
         raise
     finally:
-        summary = save_fingerprint_summary(folder, report)
+        report["assessment_counts"] = {
+            value: sum(ap["assessment"] == value for ap in report["access_points"])
+            for value in sorted({ap["assessment"] for ap in report["access_points"]})
+        }
         write_wireless_report(folder, report)
-        if summary is not None:
-            if summary["assessment"] != "NOT_TESTED":
-                show_wifi(report["access_points"], refresh=True)
+        show_wifi(report["access_points"])
+        if report.get("not_tested_reason"):
+            print("  NOT_TESTED: " + safe_text(report["not_tested_reason"]))
+        for result in report["targets"]:
+            summary = result["fingerprint"]
             if summary["reason"] or summary["warning"]:
                 print(
-                    "  "
-                    + summary["assessment"]
-                    + ": "
+                    f"  ID {result['target']['id']}: "
                     + safe_text(summary["reason"] or summary["warning"])
                 )
-            radio = report.get("radio_setup") or {}
+            radio = result.get("radio_setup") or {}
             if radio.get("restore_error"):
-                print(
-                    tint(
-                        "  No se pudo restaurar el Wi-Fi: " + safe_text(radio["restore_error"]),
-                        AMBER,
-                    )
-                )
+                print("  No se pudo restaurar el Wi-Fi: " + safe_text(radio["restore_error"]))
         print(f"  Informe y evidencias: {folder}")
 
 
@@ -2659,6 +3008,15 @@ def main(argv=None):
     parser.add_argument("--version", action="version", version="POLTERHEIST " + VERSION)
     parser.add_argument("--check", action="store_true", help="Diagnóstico local; no escanea la red")
     parser.add_argument(
+        "--setup",
+        action="store_true",
+        help="Instalar dependencias y crear el entorno Python según el sistema operativo",
+    )
+    parser.add_argument(
+        "--ssid", help="SSID autorizado para evaluar; por defecto, la red conectada"
+    )
+    parser.add_argument("--bssid", help="Limitar la evaluación a un BSSID del SSID autorizado")
+    parser.add_argument(
         "--wireless",
         "--wpscan",
         "--fingerprint",
@@ -2667,9 +3025,22 @@ def main(argv=None):
     )
     parser.add_argument("--windows-elevated", action="store_true", help=argparse.SUPPRESS)
     options = parser.parse_args(argv)
+    if options.setup:
+        try:
+            return setup_environment()
+        except (OSError, RuntimeError, subprocess.SubprocessError) as error:
+            print("  [!] " + safe_text(error))
+            return 1
+    if options.ssid is not None or options.bssid is not None:
+        options.wireless = True
     if options.check:
         print(
-            "POLTERHEIST " + VERSION + " | Python " + sys.version.split()[0] + " | " + sys.platform
+            "POLTERHEIST "
+            + VERSION
+            + " | Python "
+            + sys.version.split()[0]
+            + " | "
+            + operating_system()["name"]
         )
         if sys.platform == "win32":
             print("  Descubrimiento Wi-Fi/WPS: API nativa de Windows (sin WSL/Nmap)")
@@ -2705,6 +3076,8 @@ def main(argv=None):
         try:
             if options.windows_elevated and not windows_is_admin():
                 raise RuntimeError("El proceso no recibió permisos de administrador.")
+            if options.ssid is not None or options.bssid is not None:
+                return wireless_recon(ssid=options.ssid, bssid=options.bssid) or 0
             return wireless_recon() or 0
         except (KeyboardInterrupt, EOFError):
             return 130

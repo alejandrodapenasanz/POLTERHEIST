@@ -489,6 +489,27 @@ class NativeApiTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "no ha confirmado"):
                 wlan.connect_profile(GUID, "Lab", timeout=0)
 
+    def test_connected_ssid_is_not_confused_with_profile_name(self):
+        ssid = "Café".encode("utf-8")
+        raw = (
+            (1).to_bytes(4, "little")
+            + bytes(4)
+            + "Different profile".encode("utf-16-le").ljust(512, b"\0")
+            + len(ssid).to_bytes(4, "little")
+            + ssid.ljust(32, b"\0")
+        )
+        buffer = ctypes.create_string_buffer(raw)
+
+        def query(handle, guid, opcode, reserved, size, data, kind):
+            size._obj.value = len(raw)
+            data._obj.value = ctypes.addressof(buffer)
+            return 0
+
+        with self.client() as (wlan, dll):
+            dll.WlanQueryInterface.side_effect = query
+            self.assertEqual(wlan.connected_profile(GUID, ssid_only=True), "Café")
+            self.assertEqual(wlan.connected_profile(GUID), "Different profile")
+
 
 if __name__ == "__main__":
     unittest.main()

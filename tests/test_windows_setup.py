@@ -27,6 +27,7 @@ class WindowsSetupTests(unittest.TestCase):
             mode="managed",
             capabilities=["managed", "monitor"],
             connected=True,
+            connected_ssid="Lab",
         )
 
     def tearDown(self):
@@ -134,7 +135,7 @@ class WindowsSetupTests(unittest.TestCase):
             app.wireless_recon()
         elevate.assert_not_called()
         probe.assert_not_called()
-        prompt.assert_called_once()
+        prompt.assert_not_called()
         self.assertEqual(output.getvalue().count("WIRELESS RESULTS"), 1)
         self.assertNotIn("[1] " + self.ap["bssid"], output.getvalue())
         self.assertNotIn("Prepara manualmente", output.getvalue())
@@ -149,6 +150,7 @@ class WindowsSetupTests(unittest.TestCase):
     def test_windows_workflow_selects_radio_automatically_but_respects_authorization(self):
         for authorized in (False, True):
             ap = dict(self.ap)
+            iface = dict(self.iface, connected_ssid="Lab" if authorized else None)
             original = {
                 "target": {"ssid": ap["ssid"], "bssid": ap["bssid"]},
                 "assessment": "PATCHED_HOSTAPD",
@@ -163,7 +165,7 @@ class WindowsSetupTests(unittest.TestCase):
             with (
                 self.subTest(authorized=authorized),
                 patch.object(app.sys, "platform", "win32"),
-                patch.object(app, "detect_wireless_interfaces", return_value=[self.iface]),
+                patch.object(app, "detect_wireless_interfaces", return_value=[iface]),
                 patch.object(app, "discover_wifi", return_value=[ap]),
                 patch.object(app, "report_folder", return_value=self.folder),
                 patch.object(app, "wlan_helper_path", return_value="helper.exe"),
@@ -178,7 +180,11 @@ class WindowsSetupTests(unittest.TestCase):
                 app.wireless_recon()
             if authorized:
                 probe.assert_called_once_with(
-                    ap, self.iface, [self.iface], self.folder, authorized=True
+                    ap,
+                    iface,
+                    [iface],
+                    self.folder / "targets" / ap["bssid"].replace(":", ""),
+                    authorized=True,
                 )
             else:
                 probe.assert_not_called()
@@ -196,7 +202,7 @@ class WindowsSetupTests(unittest.TestCase):
             patch.object(app, "discover_wifi") as discover,
         ):
             self.assertEqual(app.wireless_recon(), 0)
-        elevate.assert_called_once_with()
+        elevate.assert_called_once_with(None, None)
         discover.assert_not_called()
 
     def test_refresh_replaces_visible_table_only_on_supported_terminal(self):

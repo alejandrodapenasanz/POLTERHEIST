@@ -14,18 +14,30 @@ La aplicación está en **`script.py`**, organizada por funciones. Se ha evoluci
 
 ## Instalación en Kali
 
-Python **3.11 o posterior**:
+Arranca Kali (por ejemplo, Kali Live desde USB), **conéctate a tu Wi-Fi** y abre el repositorio. Se necesita Python **3.11 o posterior**:
 
 ```bash
-sudo apt update
-sudo apt install python3 python3-venv nmap arp-scan iproute2 iw network-manager tcpdump
-python3 -m venv .venv
-.venv/bin/python -m pip install -r requirements.txt
+git clone https://github.com/alejandrodapenasanz/POLTERHEIST.git
+cd POLTERHEIST
+python3 script.py --setup
 .venv/bin/python script.py --check
-sudo .venv/bin/python script.py
+.venv/bin/python script.py --wireless
 ```
 
-`requirements.txt` fija Scapy 2.7.0. Los comandos del sistema se instalan con `apt`, no con `pip`. Menú, perfil y parsers no requieren root. LAN, captura monitor y fingerprint WPS sí. `arp-scan` es recomendable; si falta o falla, el descubrimiento continúa con Nmap. Para una captura con `tcpdump` se necesita el soporte libpcap que instala el paquete de Kali.
+`script.py` detecta Windows o Linux y lee `/etc/os-release` para identificar Kali. `--setup` instala las herramientas con APT, añade `firmware-mediatek` en Kali y crea un entorno virtual con Scapy 2.7.0, sin modificar el Python del sistema. Si copiaste una `.venv` de Windows a Linux, conserva esa carpeta y crea `.venv-linux`; utiliza la ruta que imprime al terminar. La instalación necesita Internet. Si Kali no reconoce la tarjeta después de actualizar su firmware, puede ser necesario reiniciar.
+
+El flujo inalámbrico solicita `sudo` automáticamente cuando lo necesita, conservando el intérprete del entorno virtual. Obtiene el **SSID conectado**, descubre sus BSSID, ejecuta el fingerprint original y **después muestra una sola tabla `WIRELESS RESULTS`**, con `ASSESSMENT` en la columna derecha. Las otras redes observadas quedan en `NOT_TESTED`. No hay selección posterior de ID ni listado duplicado de BSSID.
+
+La preparación de la radio y su restauración son automáticas. Si utiliza el adaptador de tu conexión, esta se pausará durante cada prueba. Se prioriza otra radio compatible desconectada cuando existe. Menú y perfil pueden abrirse con `.venv/bin/python script.py`; LAN requiere root.
+
+Para indicar otra red propia/autorizada o limitar el análisis a un BSSID:
+
+```bash
+.venv/bin/python script.py --wireless --ssid 'Mi Wi-Fi'
+.venv/bin/python script.py --wireless --ssid 'Mi Wi-Fi' --bssid aa:bb:cc:dd:ee:ff
+```
+
+Sin conexión ni `--ssid`, se muestra el descubrimiento sin ejecutar pruebas activas. Un SSID compartido por varios BSSID obtiene un resultado independiente para cada uno; no se propaga un positivo entre radios.
 
 El flujo LAN requiere Linux. El descubrimiento Wi-Fi y WPS dispone de un backend nativo de Windows; no necesita `iw`, WSL, Nmap ni `arp-scan`.
 
@@ -40,7 +52,7 @@ py -m venv .venv
 .\.venv\Scripts\python.exe script.py --wpscan
 ```
 
-`--wpscan`, `--wireless` y `--fingerprint` abren directamente WIRELESS RECON y la selección de objetivo para evaluar WPS; también puedes usar la opción `[2]` del menú. Aquí `wpscan` se refiere a WPS de Wi-Fi.
+`--wpscan`, `--wireless` y `--fingerprint` ejecutan el flujo automático sobre el SSID conectado; también puedes usar `[2]` en el menú. `--ssid` permite indicar explícitamente el alcance autorizado. Aquí `wpscan` se refiere a WPS de Wi-Fi.
 
 ### Comprobar vulnerabilidad con el fingerprint
 
@@ -48,9 +60,9 @@ py -m venv .venv
 .\.venv\Scripts\python.exe script.py --fingerprint
 ```
 
-Selecciona el **ID de tu red directamente en WIRELESS RESULTS**, sin un segundo listado de BSSID. Si solo hay una interfaz, se elige automáticamente. En Windows el programa selecciona un adaptador compatible, priorizando uno desconectado, y prepara modo monitor/canal tras confirmar `AUTORIZO <BSSID>`. En Linux se utiliza una interfaz monitor ya preparada.
+La aplicación utiliza la red conectada como alcance autorizado por defecto, prepara una radio compatible y evalúa secuencialmente sus BSSID observados. `--bssid` permite limitarla a una radio concreta. La ausencia de respuesta o la falta de soporte del controlador no se convierten en un resultado negativo.
 
-Al terminar se actualiza la columna **ASSESSMENT** del BSSID seleccionado. En una terminal compatible se sustituye la tabla visible; al redirigir la salida se conservan las dos instantáneas, sin secuencias de control. Si no se inicia la prueba, se mantiene la tabla inicial y se añade el motivo. Se conserva literalmente el resultado de `broadcom_fingerprint.py` de [`qkaiser/broadcom-wps`](https://github.com/qkaiser/broadcom-wps#assessments):
+Se muestra **una sola tabla al terminar las evaluaciones**, también al redirigir la salida a un archivo. Cada fila conserva literalmente el resultado de `broadcom_fingerprint.py` de [`qkaiser/broadcom-wps`](https://github.com/qkaiser/broadcom-wps#assessments):
 
 | ASSESSMENT | Significado |
 | --- | --- |
@@ -61,9 +73,9 @@ Al terminar se actualiza la columna **ASSESSMENT** del BSSID seleccionado. En un
 | `NOT_TESTED` | Estado de POLTERHEIST: la prueba no se ejecutó; se muestra el motivo. |
 | `ERROR` | Estado de POLTERHEIST: fallo de ejecución o evidencia que no corresponde al objetivo. |
 
-Las redes sin evaluar siguen en `NOT_TESTED`, incluso si comparten SSID con la red evaluada. Los resultados `PATCHED_HOSTAPD` y `NO_BROADCOM_FINGERPRINT` se mantienen separados en pantalla y en los informes. Solo `LIKELY_VULNERABLE` es un hallazgo positivo; no confirma explotación ni RCE. `INCONCLUSIVE` no significa que el equipo sea seguro.
+Las redes fuera del alcance o cuya prueba no pudo iniciarse siguen en `NOT_TESTED`. Los resultados `PATCHED_HOSTAPD` y `NO_BROADCOM_FINGERPRINT` se mantienen separados en pantalla y en los informes. Solo `LIKELY_VULNERABLE` es un hallazgo positivo; no confirma explotación ni RCE. `INCONCLUSIVE` no significa que el equipo sea seguro.
 
-El detalle —explicación en español, implementación estimada, respuestas, estado del objetivo y advertencias— se guarda en `reports/wireless/<scan_id>/fingerprint.json` y se incorpora a `report.json`, conservando el mismo `assessment` que el detector. La pantalla muestra la tabla y, si corresponde, el motivo o advertencia. Los archivos originales `upstream_result.json` y PCAP se conservan. Un positivo o negativo requiere una salida original del detector correspondiente al SSID/BSSID elegido; el fabricante, la presencia de WPS o la seguridad WPA no bastan.
+El detalle —explicación, implementación estimada, respuestas, estado y advertencias— se guarda en `reports/wireless/<scan_id>/targets/<BSSID_sin_dos_puntos>/fingerprint.json`. El `report.json` general contiene todos los resultados y sus rutas. Para un único objetivo también se conserva `fingerprint.json` en la carpeta principal. Los archivos originales `upstream_result.json` y PCAP se conservan por BSSID. Un positivo o negativo requiere una salida original correspondiente al SSID/BSSID; el fabricante, la presencia de WPS o la seguridad WPA no bastan.
 
 Si falta Npcap en Windows, aparece `NOT_TESTED` con el motivo. Añadir el comando no sustituye los requisitos de captura/inyección que se detallan a continuación.
 
@@ -100,7 +112,7 @@ Solo como recuperación si el proceso se cerró por la fuerza, puedes devolver e
 & $wlanHelper $wifiGuid mode managed
 ```
 
-La prueba sigue exigiendo `AUTORIZO <BSSID>` y bloquea desautenticación/desasociación. Se adapta únicamente la captura/transmisión y el control de canal del detector original a Scapy/Npcap; su lógica de detección y los archivos upstream no se modifican. Si el controlador no admite este flujo, utiliza un adaptador compatible en Kali. [Requisitos de Npcap](https://npcap.com/guide/npcap-devguide.html#npcap-feature-dot11).
+La prueba se limita a los BSSID del alcance autorizado y bloquea desautenticación/desasociación. Se adapta únicamente la captura/transmisión y el control de canal del detector original a Scapy/Npcap; su lógica de detección y los archivos upstream no se modifican. Si el controlador no admite este flujo, utiliza un adaptador compatible en Kali. [Requisitos de Npcap](https://npcap.com/guide/npcap-devguide.html#npcap-feature-dot11).
 
 ## Perfil
 
@@ -119,7 +131,7 @@ El alcance LAN es la subred IPv4 de la ruta predeterminada, con límite de 4096 
 
 ## WIRELESS RECON
 
-En Linux, `iw` enumera interfaces, PHY, controlador, modo actual, conexión, modos admitidos y frecuencias. Ese backend no detiene NetworkManager ni convierte automáticamente una interfaz a monitor. En Windows se utiliza Native Wi-Fi para descubrir redes y WlanHelper para consultar, preparar y restaurar el adaptador de la prueba autorizada.
+En Linux, `iw` enumera interfaces, PHY, controlador, modo actual, conexión, modos admitidos y frecuencias. Se prepara automáticamente una radio compatible y se restaura al terminar; NetworkManager sigue funcionando para las demás interfaces. En Windows se utiliza Native Wi-Fi para descubrir redes y WlanHelper para preparar/restaurar la radio.
 
 | Interfaz | Descubrimiento | Límites |
 | --- | --- | --- |
@@ -135,18 +147,9 @@ La tabla muestra ID, SSID, BSSID, canal, seguridad, WPS, señal y evaluación. U
 
 Una interfaz Ethernet virtual, incluso puenteada sobre el Wi-Fi del host, no permite capturar tramas 802.11. En VirtualBox se necesita **passthrough de un adaptador Wi-Fi USB** al invitado, con controlador Linux que admita monitor e inyección. Que `iw` anuncie monitor no garantiza recepción o inyección funcionales. Comprueba `iw dev`, `iw phy`, `rfkill list` y los mensajes de firmware/controlador.
 
-Para evaluar WPS usa un adaptador dedicado, sin una conexión que necesites conservar. Estos comandos son **manuales** y desconectarán la interfaz indicada; sustituye `wlan1` solo por ese adaptador:
+En Kali se guarda el modo original, frecuencia, estado UP/DOWN, gestión de NetworkManager y UUID de la conexión. Se libera **solo esa interfaz** de NetworkManager y se configura con `iw ... set monitor otherbss control`, necesario para recibir otras BSS con controladores como MediaTek. Se fija y verifica la frecuencia antes del detector. Al terminar o cancelar, se restauran modo/estado y la conexión anterior; los fallos se guardan en `radio_setup.json`. No se cambia el dominio regulatorio. [Configuración upstream](https://github.com/qkaiser/broadcom-wps#broadcom-sdk-fingerprinter).
 
-```bash
-sudo nmcli device set wlan1 managed no
-sudo ip link set dev wlan1 down
-sudo iw dev wlan1 set monitor otherbss control
-sudo ip link set dev wlan1 up
-sudo iw dev wlan1 set channel 6
-sudo tcpdump -i wlan1 -e -n -c 5 'type mgt subtype beacon'
-```
-
-Al acabar, si quieres devolver ese adaptador a managed:
+Si falla la restauración se detiene el resto de pruebas. Un apagado o cierre forzado puede impedirla; para recuperar manualmente una interfaz que originalmente estaba en managed, sustituye `wlan1`:
 
 ```bash
 sudo ip link set dev wlan1 down
@@ -161,10 +164,11 @@ En Linux, la aplicación rechaza cambios de canal/pruebas cuando otra interfaz c
 
 Se integra [`qkaiser/broadcom-wps`](https://github.com/qkaiser/broadcom-wps/tree/3cb3ef77d6b71e8441a51668c7e2b919608180f9), de **Quentin Kaiser**, commit completo **`3cb3ef77d6b71e8441a51668c7e2b919608180f9`**, licencia MIT. Referencia: [One Parser, Two Bugs](https://quentinkaiser.be/security/2026/10/16/one-parser-two-bugs/).
 
-1. Descubre redes y selecciona un ID concreto.
-2. Windows selecciona y prepara el adaptador compatible; en Linux selecciona una interfaz monitor dedicada.
-3. Confirma el SSID/BSSID mostrado escribiendo **`AUTORIZO aa:bb:cc:dd:ee:ff`**, con el BSSID elegido.
-4. Se vuelve a observar pasivamente ese SSID/BSSID en su canal antes del intercambio activo. No se evalúan automáticamente otros AP.
+1. Toma el SSID conectado, o el indicado mediante `--ssid`, como alcance autorizado. `--bssid` lo restringe a una radio.
+2. Descubre los AP y evalúa secuencialmente solo los BSSID que coinciden con ese alcance.
+3. Prepara/restaura automáticamente el adaptador correspondiente al sistema operativo.
+4. Cada prueba vuelve a observar pasivamente su SSID/BSSID en su canal antes del intercambio activo.
+5. Muestra una sola tabla final con los resultados por BSSID; el resto de redes queda en `NOT_TESTED`.
 
 Se importa la API del detector original, cuya integridad SHA-256 se verifica. Su lanzador por SSID no se utiliza: podría elegir otro BSSID con el mismo nombre. Las decisiones de `fingerprint_target` y `decide_assessment` permanecen sin modificar.
 
@@ -192,10 +196,12 @@ reports/
   wireless/<fecha_UTC_microsegundos_id>/
     report.json, discovery.json, iw_scan.log o nmcli_scan.log
     windows_bss.bin, windows_discovery.json  # descubrimiento nativo Windows
-    radio_setup.json                    # preparación/restauración Windows, si se inicia
-    fingerprint.json                   # veredicto, motivo y evidencias del objetivo seleccionado
+    fingerprint.json                   # resumen compatible si hay un único objetivo
     discovery_*MHz.pcap y .log          # si se captura en monitor
-    upstream_result.json, fingerprint.pcap  # si se generan durante la prueba
+    targets/<BSSID_sin_dos_puntos>/
+      report.json, fingerprint.json
+      radio_setup.json                 # preparación/restauración Linux o Windows
+      upstream_result.json, fingerprint.pcap  # si se generan durante la prueba
 ```
 
 Los informes incluyen versión, hora UTC, objetivo, autorización, fuentes, clasificación, límites y recomendaciones. El informe inalámbrico incluye seguridad, canal, señal, indicadores WPS, identidad de fabricante disponible, salida upstream y hashes de las evidencias. JSON y PCAP originales no se reescriben para cambiar conclusiones. Cada ejecución usa una carpeta nueva. Ctrl+C conserva lo disponible y devuelve al menú; no se inventan resultados para procesos interrumpidos. Un XML truncado se conserva aunque no se pueda analizar.
@@ -211,6 +217,8 @@ Los informes incluyen versión, hora UTC, objetivo, autorización, fuentes, clas
 Las pruebas sin hardware cubren menú y perfil, descubrimiento LAN combinado, selección/local/Apple, identificación, servicios/CVE, modos, interfaces, WPA/WPA2/WPA3, escapes de SSID, selección/autorización, decisiones **del código upstream real con respuestas simuladas**, bloqueo de desautenticación/otro BSSID, JSON/PCAP y cancelación. Las capturas y salidas de red de los tests son fixtures sintéticos, no mediciones de redes reales.
 
 Si Nmap está instalado, una prueba adicional arranca un servidor HTTP temporal en **127.0.0.1** y lo inspecciona con Nmap real. GitHub Actions ejecuta la suite en **Linux y Windows**, con Python 3.11 y 3.13, e instala Nmap para el test local en Linux. Esta prueba no equivale a validar el escaneo de 65535 puertos, ARP, huellas de SO ni NSE de vulnerabilidades sobre equipos reales.
+
+Otro trabajo de CI usa la imagen oficial `kalilinux/kali-rolling`, ejecuta `script.py --setup` y `--check`, verifica que se detecta Kali y corre la suite dentro de esa distribución. La preparación Linux se prueba con radios simuladas, incluyendo fallos parciales, cancelación, reconexión y exclusión de canales no permitidos. También se verifica que la tabla aparece una sola vez, después de evaluar los BSSID del SSID conectado, sin probar redes de otro nombre.
 
 Los tests de Windows cubren estructuras/offsets de Native Wi-Fi, BSSID múltiples, WPS real en IE sintéticos, WPA/RSN, errores de ubicación/servicio, notificaciones, caché, memoria nativa, conservación de evidencias y adaptación a Npcap. También comprueban elevación UAC simulada, preparación, fallos parciales, cancelación, restauración y reconexión al perfil anterior, además de rechazar controladores sin monitor antes de modificar la radio. El descubrimiento y la lectura del perfil activo se han comprobado con un MediaTek MT7921 en Windows. La preparación y el intercambio WPS activo están validados con mocks; requieren una prueba física con hardware/controlador compatible.
 

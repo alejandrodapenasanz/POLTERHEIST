@@ -507,7 +507,7 @@ class UpstreamIntegrationTests(QuietTest):
             patch.object(app, "report_folder", return_value=self.folder),
             patch.object(app, "discover_wifi", return_value=aps),
             patch.object(app, "fingerprint_selected") as fingerprint,
-            patch("builtins.input", side_effect=["1", "1", "1", ""]),
+            patch("builtins.input", side_effect=["1", ""]),
         ):
             app.wireless_recon()
         fingerprint.assert_not_called()
@@ -558,9 +558,7 @@ class UpstreamIntegrationTests(QuietTest):
                     patch.object(app, "report_folder", return_value=self.folder),
                     patch.object(app, "discover_wifi", return_value=aps),
                     patch.object(app, "fingerprint_selected", return_value=outcome) as fingerprint,
-                    patch(
-                        "builtins.input", side_effect=["1", "2", "1", "AUTORIZO " + aps[1]["bssid"]]
-                    ),
+                    patch("builtins.input", side_effect=["2", "AUTORIZO " + aps[1]["bssid"]]),
                     contextlib.redirect_stdout(output),
                 ):
                     app.wireless_recon()
@@ -580,7 +578,10 @@ class UpstreamIntegrationTests(QuietTest):
                     [a["assessment"] for a in report["access_points"]],
                     ["NOT_TESTED", expected, "NOT_TESTED"],
                 )
-                before, after = output.getvalue().split("POLTERHEIST :: WIRELESS RESULTS")
+                _, before, after = output.getvalue().split("POLTERHEIST :: WIRELESS RESULTS")
+                self.assertNotIn("WIRELESS DISCOVERY", output.getvalue())
+                self.assertNotIn("[2] " + aps[1]["bssid"], output.getvalue())
+                self.assertNotIn("POLTERHEIST :: WPS FINGERPRINT", output.getvalue())
                 for ap, assessment in zip(aps, ["NOT_TESTED", expected, "NOT_TESTED"]):
                     for section, status in [(before, "NOT_TESTED"), (after, assessment)]:
                         rows = [

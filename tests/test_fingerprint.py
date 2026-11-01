@@ -135,7 +135,7 @@ class FingerprintTests(unittest.TestCase):
 
     def test_fingerprint_cli_alias(self):
         with (
-            patch.object(app, "wireless_recon") as wireless,
+            patch.object(app, "wireless_recon", return_value=None) as wireless,
             contextlib.redirect_stdout(io.StringIO()),
         ):
             self.assertEqual(app.main(["--fingerprint"]), 0)
@@ -159,7 +159,7 @@ class FingerprintTests(unittest.TestCase):
             patch.object(app, "discover_wifi", return_value=[self.ap]),
             patch.object(app, "wlan_helper_path", return_value=None),
             patch.object(app, "fingerprint_selected") as probe,
-            patch("builtins.input", side_effect=["1", "1"]),
+            patch("builtins.input", side_effect=["1"]),
             contextlib.redirect_stdout(output),
         ):
             app.wireless_recon()
@@ -167,7 +167,9 @@ class FingerprintTests(unittest.TestCase):
         report = json.loads((self.folder / "report.json").read_text(encoding="utf-8"))
         self.assertEqual(report["assessment"], "NOT_TESTED")
         self.assertIn("Falta Npcap", report["fingerprint"]["reason"])
-        self.assertIn("NO EVALUADO", output.getvalue())
+        self.assertIn("NOT_TESTED: Falta Npcap", output.getvalue())
+        self.assertEqual(output.getvalue().count("WIRELESS RESULTS"), 1)
+        self.assertNotIn("[1] " + self.ap["bssid"], output.getvalue())
         self.assertTrue((self.folder / "fingerprint.json").is_file())
 
 

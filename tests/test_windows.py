@@ -177,16 +177,36 @@ class WindowsTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "Npcap.*raw 802.11"):
                 app.wlan_helper(GUID, "mode")
 
-    def test_helper_mode_changes_not_allowed(self):
+    def test_helper_rejects_unrecognized_mode_and_invalid_guid(self):
         with (
             patch.object(app, "wlan_helper_path", return_value="helper.exe"),
             patch.object(app, "run_quiet") as run,
         ):
             with self.assertRaises(ValueError):
-                app.wlan_helper(GUID, "mode", "monitor")
+                app.wlan_helper(GUID, "mode", "master")
             with self.assertRaises(ValueError):
                 app.wlan_helper("bad;command", "mode")
         run.assert_not_called()
+
+    def test_helper_accepts_only_bounded_preparation_commands(self):
+        with (
+            patch.object(app, "wlan_helper_path", return_value="helper.exe"),
+            patch.object(
+                app, "run_quiet", return_value=Mock(returncode=0, stdout="Success")
+            ) as run,
+        ):
+            for setting, value in [
+                ("mode", "monitor"),
+                ("mode", "managed"),
+                ("channel", 6),
+                ("freq", 5180),
+            ]:
+                app.wlan_helper(GUID, setting, value)
+                self.assertEqual(run.call_args.args[0], ["helper.exe", GUID, setting, str(value)])
+            for setting, value in [("channel", 0), ("channel", 36), ("freq", 1), ("modes", 1)]:
+                with self.assertRaises(ValueError):
+                    app.wlan_helper(GUID, setting, value)
+        self.assertEqual(run.call_count, 4)
 
     def test_discovery_without_npcap_still_available(self):
         wlan = Mock()
@@ -215,7 +235,7 @@ class WindowsTests(unittest.TestCase):
         self.assertTrue(all(len(call.args) == 2 for call in helper.call_args_list))
 
     def test_wpscan_cli_alias(self):
-        with patch.object(app, "wireless_recon") as wireless:
+        with patch.object(app, "wireless_recon", return_value=None) as wireless:
             self.assertEqual(app.main(["--wpscan"]), 0)
         wireless.assert_called_once_with()
 
@@ -281,7 +301,6 @@ class WindowsTests(unittest.TestCase):
             app.require_windows_monitor(ap, iface)
         for changed_ap, changed_iface in [
             (dict(ap, frequency_mhz=5180), iface),
-            (ap, dict(iface, connected=True)),
             (dict(ap, in_reg_domain=False), iface),
         ]:
             with (
@@ -304,7 +323,7 @@ class WindowsTests(unittest.TestCase):
                 app.require_windows_monitor(ap, iface)
             windll.shell32.IsUserAnAdmin.return_value = 1
             with patch.object(app, "wlan_helper", side_effect=["managed", "6"]):
-                with self.assertRaisesRegex(RuntimeError, "manualmente"):
+                with self.assertRaisesRegex(RuntimeError, "preparación automática"):
                     app.require_windows_monitor(ap, iface)
 
     def test_windows_fingerprint_uses_unmodified_decisions_and_evidence(self):
@@ -317,7 +336,7 @@ class WindowsTests(unittest.TestCase):
             upstream.ResponseKind.REJECTED, False, None
         )
         with (
-            patch.object(app, "require_windows_monitor"),
+            patch.object(app, "prepared_windows_monitor", return_value=contextlib.nullcontext()),
             patch.object(app, "windows_upstream_transport", return_value=contextlib.nullcontext()),
             patch.object(app, "observe_selected", return_value=target),
             patch.object(
@@ -335,7 +354,7 @@ class WindowsTests(unittest.TestCase):
 
     def test_windows_fingerprint_cancellation_preserves_artifact(self):
         with (
-            patch.object(app, "require_windows_monitor"),
+            patch.object(app, "prepared_windows_monitor", return_value=contextlib.nullcontext()),
             patch.object(app, "windows_upstream_transport", return_value=contextlib.nullcontext()),
             patch.object(app, "observe_selected", side_effect=KeyboardInterrupt),
         ):
@@ -434,6 +453,41 @@ class NativeApiTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 wlan.bss(GUID)
             dll.WlanFreeMemory.assert_called_once()
+
+    def test_current_profile_reads_only_header_and_frees_buffer(self):
+        profile = "Lab ñ"
+        raw = (1).to_bytes(4, "little") + bytes(4) + profile.encode("utf-16-le").ljust(512, b"\0")
+        buffer = ctypes.create_string_buffer(raw)
+
+        def query(handle, guid, opcode, reserved, size, data, kind):
+            self.assertEqual(opcode, 7)
+            size._obj.value = len(raw)
+            data._obj.value = ctypes.addressof(buffer)
+            return 0
+
+        with self.client() as (wlan, dll):
+            dll.WlanQueryInterface.side_effect = query
+            self.assertEqual(wlan.connected_profile(GUID), profile)
+            dll.WlanFreeMemory.assert_called_once()
+            dll.WlanQueryInterface.side_effect = None
+            dll.WlanQueryInterface.return_value = 5023
+            self.assertIsNone(wlan.connected_profile(GUID))
+
+    def test_reconnection_requests_saved_profile_and_waits_for_confirmation(self):
+        with self.client() as (wlan, dll):
+            dll.WlanConnect.return_value = 0
+            with (
+                patch.object(wlan, "connected_profile", side_effect=[None, "Lab"]),
+                patch.object(app.time, "sleep"),
+            ):
+                wlan.connect_profile(GUID, "Lab")
+            parameters = dll.WlanConnect.call_args.args[2]._obj
+            self.assertEqual(parameters.mode, 0)
+            self.assertEqual(parameters.profile, "Lab")
+            self.assertIsNone(parameters.ssid)
+            self.assertIsNone(parameters.bssids)
+            with self.assertRaisesRegex(RuntimeError, "no ha confirmado"):
+                wlan.connect_profile(GUID, "Lab", timeout=0)
 
 
 if __name__ == "__main__":

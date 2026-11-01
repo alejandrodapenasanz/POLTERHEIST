@@ -48,7 +48,9 @@ py -m venv .venv
 .\.venv\Scripts\python.exe script.py --fingerprint
 ```
 
-Selecciona la interfaz, el **ID de una red** en la tabla y la interfaz monitor preparada. Confirma el SSID/BSSID escribiendo `AUTORIZO <BSSID>`. Al terminar aparece la tabla **WIRELESS RESULTS**, con la columna **ASSESSMENT** actualizada para ese BSSID. Conserva literalmente el resultado de `broadcom_fingerprint.py` de [`qkaiser/broadcom-wps`](https://github.com/qkaiser/broadcom-wps#assessments):
+Selecciona el **ID de tu red directamente en WIRELESS RESULTS**, sin un segundo listado de BSSID. Si solo hay una interfaz, se elige automáticamente. En Windows el programa selecciona un adaptador compatible, priorizando uno desconectado, y prepara modo monitor/canal tras confirmar `AUTORIZO <BSSID>`. En Linux se utiliza una interfaz monitor ya preparada.
+
+Al terminar se actualiza la columna **ASSESSMENT** del BSSID seleccionado. En una terminal compatible se sustituye la tabla visible; al redirigir la salida se conservan las dos instantáneas, sin secuencias de control. Si no se inicia la prueba, se mantiene la tabla inicial y se añade el motivo. Se conserva literalmente el resultado de `broadcom_fingerprint.py` de [`qkaiser/broadcom-wps`](https://github.com/qkaiser/broadcom-wps#assessments):
 
 | ASSESSMENT | Significado |
 | --- | --- |
@@ -61,9 +63,9 @@ Selecciona la interfaz, el **ID de una red** en la tabla y la interfaz monitor p
 
 Las redes sin evaluar siguen en `NOT_TESTED`, incluso si comparten SSID con la red evaluada. Los resultados `PATCHED_HOSTAPD` y `NO_BROADCOM_FINGERPRINT` se mantienen separados en pantalla y en los informes. Solo `LIKELY_VULNERABLE` es un hallazgo positivo; no confirma explotación ni RCE. `INCONCLUSIVE` no significa que el equipo sea seguro.
 
-La pantalla **WPS FINGERPRINT** añade la explicación en español, implementación estimada, respuestas observadas, estado del objetivo y advertencias disponibles. Se guarda en `reports/wireless/<scan_id>/fingerprint.json` y se incorpora a `report.json`, conservando el mismo `assessment` que el detector. Los archivos originales `upstream_result.json` y PCAP se conservan. Un positivo o negativo requiere una salida original del detector correspondiente al SSID/BSSID elegido; el fabricante, la presencia de WPS o la seguridad WPA no bastan.
+El detalle —explicación en español, implementación estimada, respuestas, estado del objetivo y advertencias— se guarda en `reports/wireless/<scan_id>/fingerprint.json` y se incorpora a `report.json`, conservando el mismo `assessment` que el detector. La pantalla muestra la tabla y, si corresponde, el motivo o advertencia. Los archivos originales `upstream_result.json` y PCAP se conservan. Un positivo o negativo requiere una salida original del detector correspondiente al SSID/BSSID elegido; el fabricante, la presencia de WPS o la seguridad WPA no bastan.
 
-Si falta Npcap en Windows, aparece **NO EVALUADO** con las instrucciones necesarias. Añadir el comando no sustituye los requisitos de captura/inyección que se detallan a continuación.
+Si falta Npcap en Windows, aparece `NOT_TESTED` con el motivo. Añadir el comando no sustituye los requisitos de captura/inyección que se detallan a continuación.
 
 El listado utiliza la **API Native Wi-Fi de Windows** (`wlanapi.dll`). Obtiene BSSID, SSID, frecuencia/canal, RSSI en dBm, calidad y elementos de información WPS/RSN/WPA proporcionados por el controlador. No depende del idioma de `netsh`. WPS solo aparece como `Detected` si existe un anuncio WPS; descubrirlo no significa que el AP sea vulnerable. Se conservan también los bytes originales del listado BSS y los IE.
 
@@ -76,23 +78,23 @@ Si aparece **error 5 / acceso denegado**, permite el acceso a **Ubicación** en 
 Para ejecutar el detector, además del listado, necesitas:
 
 - [Npcap](https://npcap.com/#download) instalado con la opción **Support raw 802.11 traffic (and monitor mode) for wireless adapters**. No se incluye ni instala automáticamente este controlador.
-- PowerShell **como administrador**.
+- Permisos de administrador: si encuentra un adaptador compatible y faltan permisos, POLTERHEIST solicita la elevación normal de **UAC** y abre su ventana de trabajo. Windows requiere que el usuario acepte ese diálogo.
 - Un adaptador/controlador que permita captura monitor e inyección 802.11. La capacidad de mostrar redes no demuestra que permita inyectar.
-- El adaptador preparado manualmente en monitor y en el canal del AP. Usa un adaptador dedicado si necesitas conservar tu conexión principal.
+- El programa configura el adaptador automáticamente. Si utiliza uno conectado, avisa antes de la autorización de que se pausará esa conexión durante la prueba. Un adaptador dedicado permite conservar la conexión principal.
 
 El transporte Windows implementado admite la **prueba activa en 2.4 GHz**. El listado puede mostrar otras bandas; la prueba activa de 5 GHz permanece en el backend Linux y el detector no admite 6 GHz. Npcap debe entregar cabeceras Radiotap y el AP seleccionado debe observarse en la frecuencia exacta antes de transmitir. Un fallo de recepción/inyección produce `ERROR` o `INCONCLUSIVE`, nunca un negativo por suposición.
 
-Primero descubre y selecciona el AP. Si Npcap está instalado y falta una interfaz monitor, la aplicación permite volver a detectarla tras prepararla en otra ventana de PowerShell. Obtén el GUID con `--check` o `netsh wlan show interfaces` y usa el canal mostrado para el objetivo. Por ejemplo, para **un AP autorizado en el canal 6**, sustituye el GUID:
+La preparación automática guarda el modo y el nombre del perfil de conexión anterior, activa `monitor`, fija el canal seleccionado y comprueba el resultado. Al salir —también por error o Ctrl+C— restaura `managed` y solicita la reconexión al perfil anterior, verificando que Windows la confirme. Si el adaptador ya estaba en monitor, restaura su frecuencia original. No lee contraseñas. `radio_setup.json` registra el estado y cualquier fallo de restauración, que también se muestra en pantalla. Un cierre forzado del proceso o del sistema puede impedir ejecutar la restauración.
+
+**Un controlador que solo anuncia `managed` no permite este fingerprint en Windows**, aunque Npcap esté instalado con soporte 802.11. El programa informa de ese impedimento y deja `NOT_TESTED`, sin desconectar el adaptador ni pedir que lo prepares manualmente. `--check` muestra los modos disponibles. Para consultar el controlador directamente:
 
 ```powershell
 $wifiGuid = 'GUID-DEL-ADAPTADOR'
 $wlanHelper = "$env:SystemRoot\System32\Npcap\WlanHelper.exe"
 & $wlanHelper $wifiGuid modes
-& $wlanHelper $wifiGuid mode monitor
-& $wlanHelper $wifiGuid channel 6
 ```
 
-**El cambio manual a monitor desconecta ese adaptador.** POLTERHEIST comprueba modo/canal, pero no los cambia. Después de terminar, puedes devolverlo manualmente al modo normal:
+Solo como recuperación si el proceso se cerró por la fuerza, puedes devolver el adaptador al modo normal desde PowerShell con permisos de administrador:
 
 ```powershell
 & $wlanHelper $wifiGuid mode managed
@@ -117,7 +119,7 @@ El alcance LAN es la subred IPv4 de la ruta predeterminada, con límite de 4096 
 
 ## WIRELESS RECON
 
-En Linux, `iw` enumera interfaces, PHY, controlador, modo actual, conexión, modos admitidos y frecuencias. En Windows se utiliza Native Wi-Fi y, si está disponible, WlanHelper para consultar monitor. El programa no detiene NetworkManager ni convierte automáticamente una interfaz a monitor.
+En Linux, `iw` enumera interfaces, PHY, controlador, modo actual, conexión, modos admitidos y frecuencias. Ese backend no detiene NetworkManager ni convierte automáticamente una interfaz a monitor. En Windows se utiliza Native Wi-Fi para descubrir redes y WlanHelper para consultar, preparar y restaurar el adaptador de la prueba autorizada.
 
 | Interfaz | Descubrimiento | Límites |
 | --- | --- | --- |
@@ -153,14 +155,14 @@ sudo ip link set dev wlan1 up
 sudo nmcli device set wlan1 managed yes
 ```
 
-En Linux, la aplicación rechaza cambios de canal/pruebas cuando otra interfaz comparte el mismo PHY, aunque parezca desconectada. No cambia automáticamente el dominio regulatorio ni intenta usar canales deshabilitados. Para fingerprint activo también rechaza canales no IR/DFS y 6 GHz, que el adaptador de este detector no maneja sin ambigüedad. En Windows exige un adaptador desconectado, monitor previamente preparado y canal coincidente, sin cambiar la radio desde el programa. El descubrimiento puede listar 6 GHz si el hardware lo expone.
+En Linux, la aplicación rechaza cambios de canal/pruebas cuando otra interfaz comparte el mismo PHY, aunque parezca desconectada. No cambia automáticamente el dominio regulatorio ni intenta usar canales deshabilitados. Para fingerprint activo también rechaza canales no IR/DFS y 6 GHz, que el adaptador de este detector no maneja sin ambigüedad. En Windows prepara el adaptador compatible y verifica monitor/canal antes de abrir la captura. El descubrimiento puede listar 6 GHz si el hardware lo expone.
 
 ### Evaluación WPSplinter
 
 Se integra [`qkaiser/broadcom-wps`](https://github.com/qkaiser/broadcom-wps/tree/3cb3ef77d6b71e8441a51668c7e2b919608180f9), de **Quentin Kaiser**, commit completo **`3cb3ef77d6b71e8441a51668c7e2b919608180f9`**, licencia MIT. Referencia: [One Parser, Two Bugs](https://quentinkaiser.be/security/2026/10/16/one-parser-two-bugs/).
 
 1. Descubre redes y selecciona un ID concreto.
-2. Selecciona una interfaz monitor dedicada.
+2. Windows selecciona y prepara el adaptador compatible; en Linux selecciona una interfaz monitor dedicada.
 3. Confirma el SSID/BSSID mostrado escribiendo **`AUTORIZO aa:bb:cc:dd:ee:ff`**, con el BSSID elegido.
 4. Se vuelve a observar pasivamente ese SSID/BSSID en su canal antes del intercambio activo. No se evalúan automáticamente otros AP.
 
@@ -190,6 +192,7 @@ reports/
   wireless/<fecha_UTC_microsegundos_id>/
     report.json, discovery.json, iw_scan.log o nmcli_scan.log
     windows_bss.bin, windows_discovery.json  # descubrimiento nativo Windows
+    radio_setup.json                    # preparación/restauración Windows, si se inicia
     fingerprint.json                   # veredicto, motivo y evidencias del objetivo seleccionado
     discovery_*MHz.pcap y .log          # si se captura en monitor
     upstream_result.json, fingerprint.pcap  # si se generan durante la prueba
@@ -209,7 +212,7 @@ Las pruebas sin hardware cubren menú y perfil, descubrimiento LAN combinado, se
 
 Si Nmap está instalado, una prueba adicional arranca un servidor HTTP temporal en **127.0.0.1** y lo inspecciona con Nmap real. GitHub Actions ejecuta la suite en **Linux y Windows**, con Python 3.11 y 3.13, e instala Nmap para el test local en Linux. Esta prueba no equivale a validar el escaneo de 65535 puertos, ARP, huellas de SO ni NSE de vulnerabilidades sobre equipos reales.
 
-Los tests de Windows cubren estructuras/offsets de Native Wi-Fi, BSSID múltiples, WPS real en IE sintéticos, WPA/RSN, errores de ubicación/servicio, notificaciones, caché, memoria nativa, conservación de evidencias y adaptación a Npcap. El descubrimiento Native Wi-Fi se ha comprobado además con un adaptador MediaTek MT7921 en Windows. El intercambio WPS activo de Windows está validado con mocks; requiere una prueba física con Npcap y hardware compatible.
+Los tests de Windows cubren estructuras/offsets de Native Wi-Fi, BSSID múltiples, WPS real en IE sintéticos, WPA/RSN, errores de ubicación/servicio, notificaciones, caché, memoria nativa, conservación de evidencias y adaptación a Npcap. También comprueban elevación UAC simulada, preparación, fallos parciales, cancelación, restauración y reconexión al perfil anterior, además de rechazar controladores sin monitor antes de modificar la radio. El descubrimiento y la lectura del perfil activo se han comprobado con un MediaTek MT7921 en Windows. La preparación y el intercambio WPS activo están validados con mocks; requieren una prueba física con hardware/controlador compatible.
 
 Pendiente de validación física: recepción/inyección monitor, regulación y restauración de canal en cada controlador Linux, y fingerprint de un AP autorizado en ambas plataformas. Los tests automatizados no necesitan ni transmiten tráfico Wi-Fi.
 

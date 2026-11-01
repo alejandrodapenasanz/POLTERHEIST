@@ -825,7 +825,7 @@ class NmapSmokeTest(QuietTest):
                 self.folder / "real_nmap.log",
                 timeout=60,
             )
-            self.assertEqual(result.returncode, 0)
+            self.assertEqual(result.returncode, 0, result.stdout)
             rows = app.parse_scan_xml(path, host(1, "127.0.0.1", local=True))
             self.assertEqual(rows[0]["port"], f"{server.server_port}/tcp")
             self.assertEqual(rows[0]["service"], "http")

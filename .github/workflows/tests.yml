@@ -27,7 +27,10 @@ jobs:
         run: python -m unittest discover -s tests -v
   kali:
     runs-on: ubuntu-latest
-    container: kalilinux/kali-rolling
+    container:
+      image: kalilinux/kali-rolling
+      # Kali's Nmap executable requests this capability when it starts.
+      options: --cap-add=NET_ADMIN
     timeout-minutes: 15
     steps:
       - name: Bootstrap Python and checkout dependencies
@@ -38,6 +41,7 @@ jobs:
       - name: Verify Kali detection and dependencies
         run: |
           .venv/bin/python -c "import script; assert script.operating_system()['id'] == 'kali'; script.require_tools('iw', 'ip', 'nmcli', 'tcpdump', 'nmap'); script.load_upstream()"
+          nmap --version
           .venv/bin/python script.py --check
       - name: Offline regressions on Kali
         run: .venv/bin/python -m unittest discover -s tests -v

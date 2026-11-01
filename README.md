@@ -92,7 +92,7 @@ Para ejecutar el detector, además del listado, necesitas:
 - [Npcap](https://npcap.com/#download) instalado con la opción **Support raw 802.11 traffic (and monitor mode) for wireless adapters**. No se incluye ni instala automáticamente este controlador.
 - Permisos de administrador: si encuentra un adaptador compatible y faltan permisos, POLTERHEIST solicita la elevación normal de **UAC** y abre su ventana de trabajo. Windows requiere que el usuario acepte ese diálogo.
 - Un adaptador/controlador que permita captura monitor e inyección 802.11. La capacidad de mostrar redes no demuestra que permita inyectar.
-- El programa configura el adaptador automáticamente. Si utiliza uno conectado, avisa antes de la autorización de que se pausará esa conexión durante la prueba. Un adaptador dedicado permite conservar la conexión principal.
+- El programa configura el adaptador automáticamente. Si utiliza uno conectado, esa conexión se pausará durante la prueba. Un adaptador dedicado permite conservar la conexión principal.
 
 El transporte Windows implementado admite la **prueba activa en 2.4 GHz**. El listado puede mostrar otras bandas; la prueba activa de 5 GHz permanece en el backend Linux y el detector no admite 6 GHz. Npcap debe entregar cabeceras Radiotap y el AP seleccionado debe observarse en la frecuencia exacta antes de transmitir. Un fallo de recepción/inyección produce `ERROR` o `INCONCLUSIVE`, nunca un negativo por suposición.
 

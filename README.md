@@ -48,17 +48,20 @@ py -m venv .venv
 .\.venv\Scripts\python.exe script.py --fingerprint
 ```
 
-Selecciona la interfaz, el **ID de una red** en la tabla y la interfaz monitor preparada. Confirma el SSID/BSSID escribiendo `AUTORIZO <BSSID>`. La pantalla **WPS FINGERPRINT** muestra el resultado del detector oficial para ese objetivo:
+Selecciona la interfaz, el **ID de una red** en la tabla y la interfaz monitor preparada. Confirma el SSID/BSSID escribiendo `AUTORIZO <BSSID>`. Al terminar aparece la tabla **WIRELESS RESULTS**, con la columna **ASSESSMENT** actualizada para ese BSSID. Conserva literalmente el resultado de `broadcom_fingerprint.py` de [`qkaiser/broadcom-wps`](https://github.com/qkaiser/broadcom-wps#assessments):
 
-| Veredicto visible | Significado |
+| ASSESSMENT | Significado |
 | --- | --- |
-| **PROBABLEMENTE VULNERABLE** | Fingerprint positivo de la implementación; no confirma RCE. |
-| **NEGATIVO SEGÚN EL DETECTOR** | Respuesta negativa para esta detección concreta; no certifica la seguridad general del AP. |
-| **NO CONCLUYENTE** | No hay evidencia suficiente para decidir. |
-| **NO EVALUADO** | La prueba no se ejecutó: se muestra el motivo y el requisito pendiente. |
-| **ERROR EN LA EVALUACIÓN** | Fallo de ejecución o evidencia que no corresponde al objetivo. |
+| `LIKELY_VULNERABLE` | Rechazo compatible con Broadcom WPS Monitor: probablemente vulnerable. |
+| `PATCHED_HOSTAPD` | ACK compatible con hostapd y evidencia Broadcom en el anuncio: equipo Broadcom con hostapd. |
+| `NO_BROADCOM_FINGERPRINT` | ACK compatible con hostapd sin evidencia Broadcom en el anuncio. |
+| `INCONCLUSIVE` | El detector no obtuvo una respuesta clasificable; consulta su advertencia. |
+| `NOT_TESTED` | Estado de POLTERHEIST: la prueba no se ejecutó; se muestra el motivo. |
+| `ERROR` | Estado de POLTERHEIST: fallo de ejecución o evidencia que no corresponde al objetivo. |
 
-La pantalla incluye, cuando existen, resultado original, implementación estimada, respuestas observadas, estado del objetivo y advertencias del detector. Se guarda en `reports/wireless/<scan_id>/fingerprint.json` y se incorpora a `report.json`. Los archivos originales `upstream_result.json` y PCAP se conservan. Un positivo o negativo requiere una salida original del detector correspondiente al SSID/BSSID elegido; el fabricante, la presencia de WPS o la seguridad WPA no bastan.
+Las redes sin evaluar siguen en `NOT_TESTED`, incluso si comparten SSID con la red evaluada. Los resultados `PATCHED_HOSTAPD` y `NO_BROADCOM_FINGERPRINT` se mantienen separados en pantalla y en los informes. Solo `LIKELY_VULNERABLE` es un hallazgo positivo; no confirma explotación ni RCE. `INCONCLUSIVE` no significa que el equipo sea seguro.
+
+La pantalla **WPS FINGERPRINT** añade la explicación en español, implementación estimada, respuestas observadas, estado del objetivo y advertencias disponibles. Se guarda en `reports/wireless/<scan_id>/fingerprint.json` y se incorpora a `report.json`, conservando el mismo `assessment` que el detector. Los archivos originales `upstream_result.json` y PCAP se conservan. Un positivo o negativo requiere una salida original del detector correspondiente al SSID/BSSID elegido; el fabricante, la presencia de WPS o la seguridad WPA no bastan.
 
 Si falta Npcap en Windows, aparece **NO EVALUADO** con las instrucciones necesarias. Añadir el comando no sustituye los requisitos de captura/inyección que se detallan a continuación.
 
@@ -168,8 +171,8 @@ El backend de transporte añade dos restricciones: fija el BSSID seleccionado y 
 | Salida upstream | Clasificación POLTERHEIST |
 | --- | --- |
 | `LIKELY_VULNERABLE` | `LIKELY_VULNERABLE` |
-| `PATCHED_HOSTAPD` | `NOT_VULNERABLE_PER_DETECTOR` |
-| `NO_BROADCOM_FINGERPRINT` | `NOT_VULNERABLE_PER_DETECTOR` |
+| `PATCHED_HOSTAPD` | `PATCHED_HOSTAPD` |
+| `NO_BROADCOM_FINGERPRINT` | `NO_BROADCOM_FINGERPRINT` |
 | `INCONCLUSIVE` o salida desconocida | `INCONCLUSIVE` |
 | Sin autorización / prueba no iniciada | `NOT_TESTED` |
 | Error de entorno, de ejecución o discrepancia de objetivo | `ERROR` |

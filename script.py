@@ -22,7 +22,7 @@ import xml.etree.ElementTree as ET
 from contextlib import contextmanager
 from pathlib import Path
 
-VERSION = "2.2.0"
+VERSION = "2.2.1"
 BASE = Path(__file__).resolve().parent
 PROFILE_PATH = BASE / "config" / "profile.json"
 REPORTS = BASE / "reports"
@@ -1683,8 +1683,8 @@ def discover_wifi(iface, interfaces, folder, limitations):
     return parse_nmcli(result.stdout)
 
 
-def show_wifi(aps):
-    print(tint("\nPOLTERHEIST :: WIRELESS DISCOVERY"))
+def show_wifi(aps, title="WIRELESS DISCOVERY"):
+    print(tint("\nPOLTERHEIST :: " + title))
     rows = []
     for ap in aps:
         level = (
@@ -1755,21 +1755,25 @@ def assessment_from_upstream(document, ap):
         or target.get("ssid") != ap["ssid"]
     ):
         return "ERROR"
-    if not isinstance(document.get("assessment"), str):
+    assessment = document.get("assessment")
+    if not isinstance(assessment, str):
         return "INCONCLUSIVE"
-    return {
-        "LIKELY_VULNERABLE": "LIKELY_VULNERABLE",
-        "PATCHED_HOSTAPD": "NOT_VULNERABLE_PER_DETECTOR",
-        "NO_BROADCOM_FINGERPRINT": "NOT_VULNERABLE_PER_DETECTOR",
-        "INCONCLUSIVE": "INCONCLUSIVE",
-    }.get(document.get("assessment"), "INCONCLUSIVE")
+    if assessment in {
+        "LIKELY_VULNERABLE",
+        "PATCHED_HOSTAPD",
+        "NO_BROADCOM_FINGERPRINT",
+        "INCONCLUSIVE",
+    }:
+        return assessment
+    return "INCONCLUSIVE"
 
 
 def fingerprint_summary(target, classification, original=None, reason=None):
     """Explain the actual detector result; missing evidence is never a positive/negative."""
     labels = {
         "LIKELY_VULNERABLE": "PROBABLEMENTE VULNERABLE",
-        "NOT_VULNERABLE_PER_DETECTOR": "NEGATIVO SEGÚN EL DETECTOR",
+        "PATCHED_HOSTAPD": "BROADCOM CON HOSTAPD SEGÚN EL DETECTOR",
+        "NO_BROADCOM_FINGERPRINT": "SIN HUELLA BROADCOM SEGÚN EL DETECTOR",
         "INCONCLUSIVE": "NO CONCLUYENTE",
         "NOT_TESTED": "NO EVALUADO",
         "ERROR": "ERROR EN LA EVALUACIÓN",
@@ -1777,7 +1781,12 @@ def fingerprint_summary(target, classification, original=None, reason=None):
     evidence_error = None
     if classification not in labels:
         classification = "INCONCLUSIVE"
-    if classification in {"LIKELY_VULNERABLE", "NOT_VULNERABLE_PER_DETECTOR", "INCONCLUSIVE"}:
+    if classification in {
+        "LIKELY_VULNERABLE",
+        "PATCHED_HOSTAPD",
+        "NO_BROADCOM_FINGERPRINT",
+        "INCONCLUSIVE",
+    }:
         if original is not None:
             detected = assessment_from_upstream(original, target)
             if detected == "ERROR":
@@ -1794,7 +1803,8 @@ def fingerprint_summary(target, classification, original=None, reason=None):
         transactions = []
     explanations = {
         "LIKELY_VULNERABLE": "El detector identifica una respuesta compatible con Broadcom WPS Monitor: vulnerabilidad probable, sin confirmar RCE.",
-        "NOT_VULNERABLE_PER_DETECTOR": "La respuesta no coincide con la implementación vulnerable según este detector. No certifica que el equipo sea seguro frente a otras vulnerabilidades.",
+        "PATCHED_HOSTAPD": "El fragmento recibió ACK como en hostapd y el anuncio contiene evidencia Broadcom. El detector identifica un equipo Broadcom que usa hostapd.",
+        "NO_BROADCOM_FINGERPRINT": "El fragmento recibió ACK como en hostapd, sin evidencia Broadcom en el anuncio. El detector no identifica la pila WPS de Broadcom.",
         "INCONCLUSIVE": "No hay evidencia suficiente para decidir si es vulnerable. Una ausencia de respuesta o de anuncios WPS no se interpreta como un resultado negativo.",
         "NOT_TESTED": "No se ha ejecutado el fingerprint activo para este objetivo.",
         "ERROR": "La evaluación ha fallado; no permite determinar si el objetivo es vulnerable.",
@@ -2317,6 +2327,7 @@ def wireless_recon():
         summary = save_fingerprint_summary(folder, report)
         write_wireless_report(folder, report)
         if summary is not None:
+            show_wifi(report["access_points"], title="WIRELESS RESULTS")
             show_fingerprint_result(summary, folder)
         print(f"  Informe y evidencias: {folder}")
 

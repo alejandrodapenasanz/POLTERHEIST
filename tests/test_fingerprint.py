@@ -33,11 +33,11 @@ class FingerprintTests(unittest.TestCase):
     def test_explicit_detector_verdicts(self):
         for original, expected, title in [
             ("LIKELY_VULNERABLE", "LIKELY_VULNERABLE", "PROBABLEMENTE VULNERABLE"),
-            ("PATCHED_HOSTAPD", "NOT_VULNERABLE_PER_DETECTOR", "NEGATIVO SEGÚN EL DETECTOR"),
+            ("PATCHED_HOSTAPD", "PATCHED_HOSTAPD", "BROADCOM CON HOSTAPD SEGÚN EL DETECTOR"),
             (
                 "NO_BROADCOM_FINGERPRINT",
-                "NOT_VULNERABLE_PER_DETECTOR",
-                "NEGATIVO SEGÚN EL DETECTOR",
+                "NO_BROADCOM_FINGERPRINT",
+                "SIN HUELLA BROADCOM SEGÚN EL DETECTOR",
             ),
             ("INCONCLUSIVE", "INCONCLUSIVE", "NO CONCLUYENTE"),
         ]:
@@ -48,7 +48,7 @@ class FingerprintTests(unittest.TestCase):
                 self.assertEqual(summary["detector_assessment"], original)
 
     def test_missing_original_never_supports_positive_or_negative(self):
-        for classification in ["LIKELY_VULNERABLE", "NOT_VULNERABLE_PER_DETECTOR"]:
+        for classification in ["LIKELY_VULNERABLE", "PATCHED_HOSTAPD", "NO_BROADCOM_FINGERPRINT"]:
             summary = app.fingerprint_summary(self.ap, classification)
             self.assertEqual(summary["assessment"], "INCONCLUSIVE")
             self.assertIn("salida original", summary["reason"])
@@ -101,7 +101,7 @@ class FingerprintTests(unittest.TestCase):
         report = {
             "selected_target": dict(self.ap),
             "access_points": [self.ap, other],
-            "assessment": "NOT_VULNERABLE_PER_DETECTOR",
+            "assessment": "PATCHED_HOSTAPD",
             "original_fingerprint": original,
         }
         summary = app.save_fingerprint_summary(self.folder, report)
@@ -123,7 +123,8 @@ class FingerprintTests(unittest.TestCase):
             app.show_fingerprint_result(summary, self.folder)
         for text in [
             "WPS FINGERPRINT",
-            "NEGATIVO SEGÚN EL DETECTOR",
+            "PATCHED_HOSTAPD",
+            "BROADCOM CON HOSTAPD SEGÚN EL DETECTOR",
             "ACK",
             "DEGRADED",
             "cleanup failed",

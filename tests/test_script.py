@@ -439,8 +439,8 @@ class WirelessParsingTests(QuietTest):
         document = {"target": {"ssid": ap["ssid"], "bssid": ap["bssid"]}}
         for raw, expected in [
             ("LIKELY_VULNERABLE", "LIKELY_VULNERABLE"),
-            ("PATCHED_HOSTAPD", "NOT_VULNERABLE_PER_DETECTOR"),
-            ("NO_BROADCOM_FINGERPRINT", "NOT_VULNERABLE_PER_DETECTOR"),
+            ("PATCHED_HOSTAPD", "PATCHED_HOSTAPD"),
+            ("NO_BROADCOM_FINGERPRINT", "NO_BROADCOM_FINGERPRINT"),
             ("INCONCLUSIVE", "INCONCLUSIVE"),
             ("NEW_VALUE", "INCONCLUSIVE"),
         ]:
@@ -516,36 +516,80 @@ class UpstreamIntegrationTests(QuietTest):
         self.assertFalse(report["authorization"]["granted"])
         self.assertEqual(report["selected_target"]["bssid"], aps[0]["bssid"])
 
-    def test_wireless_workflow_annotates_only_selected_ap(self):
+    def test_wireless_workflow_preserves_upstream_assessment_in_table_and_report(self):
         iface = app.parse_iw_interfaces(IW_DEV)[1]
         iface.update(driver="fixture", connected=False)
-        aps = app.parse_iw_scan(IW_SCAN)
-        outcome = {
-            "classification": "LIKELY_VULNERABLE",
-            "original": {
-                "target": {"ssid": aps[1]["ssid"], "bssid": aps[1]["bssid"]},
-                "assessment": "LIKELY_VULNERABLE",
-            },
-            "error": None,
-            "limitations": [],
-        }
-        with (
-            patch.object(app, "require_linux"),
-            patch.object(app, "detect_wireless_interfaces", return_value=[iface]),
-            patch.object(app, "report_folder", return_value=self.folder),
-            patch.object(app, "discover_wifi", return_value=aps),
-            patch.object(app, "fingerprint_selected", return_value=outcome) as fingerprint,
-            patch("builtins.input", side_effect=["1", "2", "1", "AUTORIZO " + aps[1]["bssid"]]),
-        ):
-            app.wireless_recon()
-        fingerprint.assert_called_once()
-        self.assertEqual(fingerprint.call_args.args[0]["bssid"], aps[1]["bssid"])
-        report = json.loads((self.folder / "report.json").read_text())
-        self.assertEqual(report["assessment"], report["selected_target"]["assessment"])
-        self.assertEqual(
-            [a["assessment"] for a in report["access_points"]],
-            ["NOT_TESTED", "LIKELY_VULNERABLE", "NOT_TESTED"],
-        )
+        for response, broadcom, expected in [
+            (self.up.ResponseKind.REJECTED, True, "LIKELY_VULNERABLE"),
+            (self.up.ResponseKind.ACK, True, "PATCHED_HOSTAPD"),
+            (self.up.ResponseKind.ACK, False, "NO_BROADCOM_FINGERPRINT"),
+            (self.up.ResponseKind.SILENCE, True, "INCONCLUSIVE"),
+        ]:
+            with self.subTest(assessment=expected):
+                aps = app.parse_iw_scan(IW_SCAN)
+                aps[0]["ssid"] = aps[1]["ssid"]  # Same SSID must not share a verdict.
+                observation = self.up.Observation(
+                    aps[1]["ssid"],
+                    aps[1]["bssid"],
+                    aps[1]["channel"],
+                    -48,
+                    wps_advertised=True,
+                    broadcom_evidence=("fixture",) if broadcom else (),
+                )
+                backend = Mock()
+                backend.probe_first_fragment.return_value = self.up.TransactionOutcome(
+                    response, False, None
+                )
+                detected = self.up.fingerprint_target(observation, backend)
+                raw_path = self.folder / "upstream_result.json"
+                self.up.write_result_json(detected, raw_path, self.folder / "unused.pcap")
+                original_bytes = raw_path.read_bytes()
+                original = json.loads(original_bytes)
+                outcome = {
+                    "classification": app.assessment_from_upstream(original, aps[1]),
+                    "original": original,
+                    "error": None,
+                    "limitations": [],
+                }
+                output = io.StringIO()
+                with (
+                    patch.object(app, "require_linux"),
+                    patch.object(app, "detect_wireless_interfaces", return_value=[iface]),
+                    patch.object(app, "report_folder", return_value=self.folder),
+                    patch.object(app, "discover_wifi", return_value=aps),
+                    patch.object(app, "fingerprint_selected", return_value=outcome) as fingerprint,
+                    patch(
+                        "builtins.input", side_effect=["1", "2", "1", "AUTORIZO " + aps[1]["bssid"]]
+                    ),
+                    contextlib.redirect_stdout(output),
+                ):
+                    app.wireless_recon()
+                fingerprint.assert_called_once()
+                self.assertEqual(fingerprint.call_args.args[0]["bssid"], aps[1]["bssid"])
+                report = json.loads((self.folder / "report.json").read_text(encoding="utf-8"))
+                summary = json.loads((self.folder / "fingerprint.json").read_text(encoding="utf-8"))
+                for actual in [
+                    report["assessment"],
+                    report["selected_target"]["assessment"],
+                    summary["assessment"],
+                    summary["detector_assessment"],
+                ]:
+                    self.assertEqual(actual, expected)
+                self.assertEqual(raw_path.read_bytes(), original_bytes)
+                self.assertEqual(
+                    [a["assessment"] for a in report["access_points"]],
+                    ["NOT_TESTED", expected, "NOT_TESTED"],
+                )
+                before, after = output.getvalue().split("POLTERHEIST :: WIRELESS RESULTS")
+                for ap, assessment in zip(aps, ["NOT_TESTED", expected, "NOT_TESTED"]):
+                    for section, status in [(before, "NOT_TESTED"), (after, assessment)]:
+                        rows = [
+                            line
+                            for line in section.splitlines()
+                            if line.startswith("|") and ap["bssid"] in line
+                        ]
+                        self.assertEqual(len(rows), 1)
+                        self.assertEqual(rows[0].split("|")[-2].strip(), status)
 
     def test_pinned_vendor_files_unchanged(self):
         manifest = json.loads((app.VENDOR / "UPSTREAM.json").read_text())

@@ -1,11 +1,12 @@
 # POLTERHEIST
 
-Herramienta de inventario y evaluación de redes propias o autorizadas: **LAN en Kali Linux y Wi-Fi/WPS en Linux y Windows**, con interfaz de terminal verde, arte ASCII y tres entradas:
+Herramienta de inventario y evaluación de redes propias o autorizadas: **LAN en Kali Linux, Wi-Fi/WPS en Linux y Windows y portal cautivo en Kali/Linux**, con interfaz de terminal verde y arte ASCII:
 
 ```text
 [0] WHO AM I?
 [1] LAN RECON
 [2] WIRELESS RECON
+[3] CAPTIVE PORTAL
 
 [q] EXIT
 ```
@@ -113,6 +114,46 @@ Solo como recuperación si el proceso se cerró por la fuerza, puedes devolver e
 ```
 
 La prueba se limita a los BSSID del alcance autorizado y bloquea desautenticación/desasociación. Se adapta únicamente la captura/transmisión y el control de canal del detector original a Scapy/Npcap; su lógica de detección y los archivos upstream no se modifican. Si el controlador no admite este flujo, utiliza un adaptador compatible en Kali. [Requisitos de Npcap](https://npcap.com/guide/npcap-devguide.html#npcap-feature-dot11).
+
+## Portal cautivo multirouter
+
+En Kali/Linux, ejecuta `python3 script.py --setup` para instalar también NetworkManager, `dnsmasq-base` y nftables. Abre `.venv/bin/python script.py` y elige **3**, o entra directamente con `.venv/bin/python script.py --portal`.
+
+El asistente ofrece:
+
+1. **Crear una Wi-Fi:** eliges el nombre (SSID) y la contraseña WPA2. Usa una interfaz Wi-Fi libre con soporte **AP**, en un canal permitido de 2.4 GHz. Esta función no necesita modo monitor. El nombre admite UTF-8 hasta 32 bytes; la contraseña debe tener 8–63 caracteres ASCII.
+2. **Usar un router como punto de acceso:** conserva la Wi-Fi configurada en ese router. Conecta uno de sus puertos **LAN** a la interfaz Ethernet de clientes del equipo Linux, configura el router como AP/bridge y desactiva su DHCP. Esa red no debe tener otra salida a Internet que evite el portal. POLTERHEIST no configura automáticamente paneles de fabricantes.
+3. **Vista previa local:** funciona también en Windows y sirve la página en `http://127.0.0.1:8080`. No crea una Wi-Fi ni cambia el acceso de los demás dispositivos.
+
+En los dos modos reales, el equipo Linux es la **pasarela** y necesita **dos interfaces independientes**: una con la conexión a Internet y otra libre para los clientes. Por ejemplo, Internet por cable y una Wi-Fi nueva, o Internet por una interfaz y un router/AP conectado a una segunda interfaz Ethernet. No se utiliza la misma radio para Internet y el nuevo AP.
+
+```text
+Internet / router de salida
+            |
+    interfaz de Internet
+     Linux + POLTERHEIST
+     interfaz de clientes
+            |
+    Wi-Fi nueva O router/AP
+            |
+         clientes
+```
+
+Esta arquitectura admite distintos fabricantes porque el control está en Linux. **Ejecutar POLTERHEIST como un cliente más del Wi-Fi actual no obliga a los demás a pasar por el portal.** Si quieres mantener ese Wi-Fi, hay que colocar su router/AP detrás de la pasarela como se indica arriba; si es tu único router de acceso a Internet, normalmente necesitarás un AP adicional o usar la Wi-Fi nueva del PC.
+
+Antes de aceptar, se permite DHCP, DNS y la página del portal; las peticiones HTTP se llevan a esa página y el resto del tráfico hacia Internet queda bloqueado. Al pulsar **Aceptar y navegar**, se habilita una sesión de una hora asociada a la IP y MAC del dispositivo. Al caducar, vuelve a requerirse aceptación. No se solicitan cuentas ni contraseñas en la página. HTTPS no se descifra ni se suplanta: para abrir el portal se usa la detección cautiva del dispositivo o la dirección HTTP que imprime el programa. La apertura automática depende del sistema del cliente.
+
+NetworkManager crea una conexión temporal con DHCP, DNS y NAT. POLTERHEIST añade una tabla propia de nftables y no borra reglas ajenas. El inicio se rechaza si ya hay reglas `input/forward` de otro firewall, una interfaz de clientes ocupada o una subred que se solapa; utiliza un equipo dedicado. IPv6 está desactivado en la conexión de clientes y bloqueado en su forwarding para evitar eludir el portal por esa vía. La identidad IP/MAC sirve para gestionar sesiones, no para acreditar la identidad de una persona.
+
+**Ctrl+C** detiene el portal, elimina su conexión temporal y restaura el estado comprobable de la interfaz y del forwarding IPv4. También se intenta restaurar tras fallos y SIGTERM. Si la restauración falla, se conserva la protección de nftables y se indica el motivo. Un apagado forzado o SIGKILL puede impedir la limpieza; `reports/portal/<sesión>/network.json` identifica el UUID de conexión y la tabla exclusivos de esa sesión para su recuperación. No ejecutes un borrado global de firewall. La contraseña no se incluye en los informes; su clave derivada se guarda en un archivo temporal solo accesible por root durante la sesión.
+
+La vista previa desde Windows también se puede abrir con:
+
+```powershell
+.\.venv\Scripts\python.exe script.py --portal-preview
+```
+
+El portal y el fingerprint son flujos separados: no ejecutes ambos sobre la misma radio. El uso físico de AP y la restauración con cada controlador siguen necesitando validación en el equipo de destino.
 
 ## Perfil
 

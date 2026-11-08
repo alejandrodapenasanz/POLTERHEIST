@@ -3,6 +3,15 @@ on: [push, pull_request, workflow_dispatch]
 permissions:
   contents: read
 jobs:
+  portal-gateway:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install isolated gateway test dependencies
+        run: sudo apt-get update && sudo apt-get install -y network-manager nftables iproute2
+      - name: Real captive portal in isolated network namespaces
+        run: sudo python3 tests/portal_netns_smoke.py
   test:
     runs-on: ${{ matrix.os }}
     strategy:

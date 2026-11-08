@@ -5,13 +5,17 @@ import argparse
 import csv
 import ctypes
 import datetime
+import getpass
 import hashlib
+import html
+import http.server
 import importlib.util
 import ipaddress
 import json
 import os
 import platform
 import re
+import secrets
 import shutil
 import signal
 import subprocess
@@ -22,8 +26,9 @@ import uuid
 import xml.etree.ElementTree as ET
 from contextlib import contextmanager
 from pathlib import Path
+from urllib.parse import parse_qs, urlsplit
 
-VERSION = "2.4.0"
+VERSION = "2.5.0"
 BASE = Path(__file__).resolve().parent
 PROFILE_PATH = BASE / "config" / "profile.json"
 REPORTS = BASE / "reports"
@@ -206,7 +211,7 @@ def run_quiet(cmd, timeout=120):
 def require_linux(root=False):
     if not sys.platform.startswith("linux"):
         raise RuntimeError(
-            "Esta función requiere Kali/Linux. En Windows están disponibles el menú, el perfil y WIRELESS RECON."
+            "Esta función requiere Kali/Linux. En Windows están disponibles el menú, el perfil, WIRELESS RECON y la vista previa del portal."
         )
     if root and os.geteuid() != 0:
         raise RuntimeError("Necesitas root: sudo .venv/bin/python script.py")
@@ -253,6 +258,8 @@ def setup_environment():
             "iproute2",
             "tcpdump",
             "network-manager",
+            "dnsmasq-base",
+            "nftables",
             "nmap",
             "arp-scan",
         ]
@@ -2971,6 +2978,685 @@ def wireless_recon(ssid=None, bssid=None):
         print(f"  Informe y evidencias: {folder}")
 
 
+def portal_validate(config):
+    """Validate all values before passing them to NetworkManager or nftables."""
+    if config["mode"] not in {"wifi", "router"}:
+        raise ValueError("Modo de portal no válido")
+    for key in ("lan", "wan"):
+        if not re.fullmatch(r"[A-Za-z0-9_.:-]{1,15}", config[key]):
+            raise ValueError("Nombre de interfaz no válido")
+    if config["lan"] == config["wan"]:
+        raise ValueError("El portal necesita dos interfaces distintas: Internet y clientes.")
+    network = ipaddress.IPv4Network(config["network"])
+    private = ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16")
+    if network.prefixlen != 24 or not any(
+        network.subnet_of(ipaddress.IPv4Network(n)) for n in private
+    ):
+        raise ValueError("La red del portal debe ser una subred privada IPv4 /24.")
+    if not 10 <= config.get("session_seconds", 3600) <= 86400:
+        raise ValueError("Duración de sesión no válida")
+    if config["mode"] == "wifi":
+        ssid = config["ssid"]
+        if not 1 <= len(ssid.encode("utf-8")) <= 32 or any(ord(c) < 32 for c in ssid):
+            raise ValueError("El nombre Wi-Fi debe tener entre 1 y 32 bytes UTF-8, sin controles.")
+        password = config["password"]
+        if not 8 <= len(password) <= 63 or any(not 32 <= ord(c) <= 126 for c in password):
+            raise ValueError("La contraseña Wi-Fi debe tener entre 8 y 63 caracteres ASCII.")
+        if not 1 <= config["channel"] <= 11:
+            raise ValueError("El portal Wi-Fi utiliza un canal permitido de 2.4 GHz (1–11).")
+    return network
+
+
+def portal_profile(config, connection):
+    network = portal_validate(config)
+    kind = "wifi" if config["mode"] == "wifi" else "ethernet"
+    profile = (
+        f"[connection]\nid=POLTERHEIST Portal\nuuid={uuid.UUID(connection)}\n"
+        f"type={kind}\ninterface-name={config['lan']}\nautoconnect=false\n\n"
+        f"[ipv4]\nmethod=shared\naddress1={network[1]}/24\nnever-default=true\n\n"
+        "[ipv6]\nmethod=disabled\n"
+    )
+    if kind == "wifi":
+        # A byte-array SSID avoids keyfile escaping and preserves UTF-8 names.
+        ssid = ";".join(str(b) for b in config["ssid"].encode("utf-8")) + ";"
+        psk = hashlib.pbkdf2_hmac(
+            "sha1", config["password"].encode(), config["ssid"].encode(), 4096, 32
+        ).hex()
+        profile += (
+            f"\n[wifi]\nmode=ap\nband=bg\nchannel={config['channel']}\nssid={ssid}\n"
+            "\n[wifi-security]\nkey-mgmt=wpa-psk\nproto=rsn;\npairwise=ccmp;\n"
+            f"group=ccmp;\npsk={psk}\n"
+        )
+    return profile
+
+
+def portal_nft_rules(config, table):
+    network = portal_validate(config)
+    if not re.fullmatch(r"polterheist_[0-9a-f]{12}", table):
+        raise ValueError("Nombre de tabla de portal no válido")
+    lan, wan = config["lan"], config["wan"]
+    # These hooks only govern the dedicated client interface. Existing tables survive.
+    return f'''table inet {table} {{
+ set clients {{ type ipv4_addr . ether_addr; flags timeout; size 256; }}
+ set destinations {{ type ipv4_addr; flags timeout; size 256; }}
+ chain input {{
+  type filter hook input priority -10; policy accept;
+  iifname "{lan}" udp sport 68 udp dport 67 accept
+  iifname "{lan}" ip saddr {network} ip daddr {network[1]} udp dport 53 accept
+  iifname "{lan}" ip saddr {network} ip daddr {network[1]} tcp dport {{ 53, 8080 }} accept
+  iifname "{lan}" drop
+ }}
+ chain forward {{
+  type filter hook forward priority -10; policy accept;
+  iifname "{lan}" oifname "{wan}" ip saddr . ether saddr @clients accept
+  oifname "{lan}" iifname "{wan}" ip daddr @destinations ct state established,related accept
+  iifname "{lan}" drop
+  oifname "{lan}" drop
+ }}
+ chain capture {{
+  type nat hook prerouting priority -110; policy accept;
+  iifname "{lan}" ip saddr . ether saddr @clients return
+  iifname "{lan}" ip saddr {network} tcp dport 80 redirect to :8080
+ }}
+}}
+'''
+
+
+def portal_nft(source, check=False):
+    result = subprocess.run(
+        ["nft", *(["--check"] if check else []), "--file", "-"],
+        input=source,
+        text=True,
+        capture_output=True,
+        timeout=15,
+        env=dict(os.environ, LC_ALL="C"),
+    )
+    if result.returncode:
+        raise RuntimeError("nftables: " + safe_text(result.stderr.strip()))
+
+
+def portal_grant(table, ip, mac, seconds):
+    if not re.fullmatch(r"polterheist_[0-9a-f]{12}", table) or not MAC.fullmatch(mac):
+        raise ValueError("Identidad de portal no válida")
+    ip = str(ipaddress.IPv4Address(ip))
+    if not 10 <= seconds <= 86400:
+        raise ValueError("Duración de sesión no válida")
+    portal_nft(
+        f"add element inet {table} clients {{ {ip} . {mac} timeout {seconds}s }}\n"
+        f"add element inet {table} destinations {{ {ip} timeout {seconds}s }}\n"
+    )
+
+
+def portal_identity(lan, ip):
+    ip = str(ipaddress.IPv4Address(ip))
+    rows = json.loads(linux_command(["ip", "-json", "neigh", "show", "to", ip, "dev", lan]))
+    for row in rows:
+        mac = row.get("lladdr", "").lower()
+        if row.get("dst") == ip and MAC.fullmatch(mac):
+            return mac
+    raise ValueError("No se pudo identificar al dispositivo en la interfaz del portal.")
+
+
+class PortalAccess:
+    """Short-lived, single-use acceptance tokens bound to the direct client's IP/MAC."""
+
+    def __init__(self, network, identity, grant, seconds=3600):
+        self.network = ipaddress.IPv4Network(network)
+        self.identity = identity
+        self.grant = grant
+        self.seconds = seconds
+        self.pending = {}
+        self.active = {}
+        self.lock = threading.Lock()
+
+    def client(self, ip):
+        address = ipaddress.IPv4Address(ip)
+        if address not in self.network or address in (
+            self.network.network_address,
+            self.network.broadcast_address,
+            self.network[1],
+        ):
+            raise ValueError("Dispositivo fuera de la red del portal")
+        return str(address), self.identity(str(address))
+
+    def page(self, ip):
+        client = self.client(ip)
+        now = time.monotonic()
+        with self.lock:
+            self.pending = {k: v for k, v in self.pending.items() if v[1] > now}
+            self.active = {k: expiry for k, expiry in self.active.items() if expiry > now}
+            if client in self.active:
+                return None
+            # Refreshing a captive browser must not exhaust the token pool.
+            self.pending = {k: v for k, v in self.pending.items() if v[0] != client}
+            if len(self.pending) >= 256:
+                raise ValueError("Portal ocupado; vuelve a intentarlo")
+            token = secrets.token_urlsafe(32)
+            self.pending[token] = (client, now + 300)
+            return token
+
+    def accept(self, ip, token):
+        client = self.client(ip)
+        with self.lock:
+            entry = self.pending.get(token)
+            if entry is None or entry[0] != client or entry[1] <= time.monotonic():
+                raise ValueError("La página ha caducado; vuelve a abrir el portal")
+            self.grant(*client, self.seconds)
+            del self.pending[token]
+            self.active[client] = time.monotonic() + self.seconds
+
+
+def portal_page(title, token=None, connected=False, preview=False):
+    message = "Acepta el acceso para navegar por Internet desde esta red."
+    form = (
+        '<form method="post" action="/accept"><input type="hidden" name="token" value="'
+        + html.escape(token or "", quote=True)
+        + '"><button name="accept" value="yes">Aceptar y navegar</button></form>'
+    )
+    if preview:
+        message = "Vista previa del portal. Esta ventana no modifica el acceso a Internet."
+        form = "<button disabled>Aceptar y navegar</button>"
+    elif connected:
+        message = "Acceso habilitado. Ya puedes continuar navegando."
+        form = ""
+    return f"""<!doctype html><html lang="es"><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>{html.escape(title)} · POLTERHEIST</title>
+<style>body{{margin:0;background:#0b1211;color:#e8f4ee;font:18px system-ui;display:grid;
+min-height:100vh;place-items:center}}main{{margin:24px;padding:32px;max-width:440px;
+border:1px solid #35554a;border-radius:20px}}small{{color:#85bca3;letter-spacing:2px}}
+h1{{overflow-wrap:anywhere}}p{{line-height:1.6;color:#c4d8cd}}button{{padding:16px 24px;
+border:0;border-radius:10px;background:#8ff0bb;color:#082b1a;font:700 17px system-ui;
+cursor:pointer;width:100%}}button:disabled{{opacity:.55;cursor:default}}</style>
+<main><small>POLTERHEIST · ACCESO WI-FI</small><h1>{html.escape(title)}</h1>
+<p>{message}</p>{form}<p><small>Usa esta conexión de forma responsable.</small></p></main></html>"""
+
+
+class PortalServer(http.server.ThreadingHTTPServer):
+    daemon_threads = True
+
+    def __init__(self, address, title, access=None):
+        self.title = title
+        self.access = access
+        self.slots = threading.BoundedSemaphore(32)
+        super().__init__(address, PortalHandler)
+
+    def process_request(self, request, address):
+        if not self.slots.acquire(blocking=False):
+            self.shutdown_request(request)
+            return
+        request.settimeout(5)
+        try:
+            super().process_request(request, address)
+        except Exception:
+            self.slots.release()
+            raise
+
+    def process_request_thread(self, request, address):
+        try:
+            super().process_request_thread(request, address)
+        finally:
+            self.slots.release()
+
+
+class PortalHandler(http.server.BaseHTTPRequestHandler):
+    server_version = "POLTERHEIST"
+    sys_version = ""
+
+    def log_message(self, *args):
+        pass  # Never log form contents, tokens, or browsing destinations.
+
+    def reply(self, status, body="", location=None):
+        payload = body.encode("utf-8")
+        self.send_response(status)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Length", str(len(payload)))
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("Referrer-Policy", "no-referrer")
+        self.send_header(
+            "Content-Security-Policy",
+            "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'",
+        )
+        if location:
+            self.send_header("Location", location)
+        self.end_headers()
+        self.wfile.write(payload)
+
+    def do_GET(self):
+        if self.server.access is None:
+            self.reply(200, portal_page(self.server.title, preview=True))
+            return
+        try:
+            token = self.server.access.page(self.client_address[0])
+            self.reply(200, portal_page(self.server.title, token, connected=token is None))
+        except (ValueError, RuntimeError, subprocess.SubprocessError) as error:
+            self.reply(403, html.escape(str(error)))
+
+    def do_POST(self):
+        if urlsplit(self.path).path != "/accept" or self.server.access is None:
+            self.reply(404)
+            return
+        try:
+            if self.headers.get_content_type() != "application/x-www-form-urlencoded":
+                raise ValueError("Formulario no válido")
+            if (
+                self.headers.get("Transfer-Encoding")
+                or len(self.headers.get_all("Content-Length", [])) != 1
+            ):
+                raise ValueError("Longitud no válida")
+            length = int(self.headers["Content-Length"])
+            if not 1 <= length <= 2048:
+                raise ValueError("Formulario demasiado grande")
+            fields = parse_qs(self.rfile.read(length).decode("ascii"), max_num_fields=3)
+            if fields.get("accept") != ["yes"] or len(fields.get("token", [])) != 1:
+                raise ValueError("Formulario no válido")
+            self.server.access.accept(self.client_address[0], fields["token"][0])
+            self.reply(303, location="/connected")
+        except (ValueError, UnicodeError, RuntimeError, subprocess.SubprocessError) as error:
+            self.reply(403, html.escape(str(error)))
+
+
+def portal_preview():
+    with PortalServer(("127.0.0.1", 8080), "Bienvenido", None) as server:
+        print("  Vista previa local: http://127.0.0.1:8080 — Ctrl+C para volver.")
+        print("  La vista previa no crea Wi-Fi ni controla el acceso de otros dispositivos.")
+        try:
+            server.serve_forever(poll_interval=0.25)
+        except KeyboardInterrupt:
+            pass
+
+
+def portal_preflight(config):
+    require_linux(root=True)
+    require_tools("nmcli", "ip", "nft", "sysctl", "dnsmasq")
+    network = portal_validate(config)
+    links = json.loads(linux_command(["ip", "-json", "address", "show"]))
+    lan = next((i for i in links if i["ifname"] == config["lan"]), None)
+    if lan is None or lan.get("link_type") != "ether" or lan.get("master"):
+        raise RuntimeError(
+            "Usa una interfaz de clientes Ethernet/Wi-Fi dedicada, fuera de bridges."
+        )
+    if any(a.get("scope") == "global" for a in lan.get("addr_info", [])):
+        raise RuntimeError("La interfaz de clientes ya tiene direcciones. Usa una interfaz libre.")
+    managed, connection = linux_nm_state(config["lan"])
+    if managed is None:
+        raise RuntimeError("NetworkManager debe estar en funcionamiento para crear el portal.")
+    if connection:
+        raise RuntimeError(
+            "La interfaz de clientes tiene una conexión activa; selecciona otra libre."
+        )
+    routes = json.loads(linux_command(["ip", "-json", "-4", "route", "show"]))
+    if not any(r.get("dst") == "default" and r.get("dev") == config["wan"] for r in routes):
+        raise RuntimeError("La interfaz de Internet debe tener una ruta predeterminada activa.")
+    for route in routes:
+        if route.get("dst") not in (None, "default"):
+            if network.overlaps(ipaddress.IPv4Network(route["dst"], strict=False)):
+                raise RuntimeError("La subred del portal coincide con una ruta existente.")
+    rules = json.loads(linux_command(["nft", "--json", "list", "ruleset"]))
+    if any(
+        item.get("chain", {}).get("hook") in {"forward", "input"}
+        for item in rules.get("nftables", [])
+    ):
+        raise RuntimeError(
+            "Ya hay un firewall/pasarela activo. El portal requiere un equipo dedicado sin reglas "
+            "input/forward previas; no se borrarán las reglas existentes."
+        )
+    if config["mode"] == "wifi":
+        require_tools("iw")
+        interfaces = detect_wireless_interfaces()
+        radio = next((i for i in interfaces if i["name"] == config["lan"]), None)
+        if radio is None or radio["mode"] != "managed" or "AP" not in radio["capabilities"]:
+            raise RuntimeError("El controlador debe admitir modo AP para crear una Wi-Fi.")
+        if any(i["phy"] == radio["phy"] and i["name"] != radio["name"] for i in interfaces):
+            raise RuntimeError("La radio de clientes no puede compartir PHY con otra interfaz.")
+        allowed = [
+            f["channel"]
+            for f in radio["frequencies"]
+            if not (f["disabled"] or f["no_ir"] or f["radar"]) and f["frequency_mhz"] < 2500
+        ]
+        if config["channel"] not in allowed:
+            raise RuntimeError(
+                "El canal elegido no permite crear un AP según la regulación actual."
+            )
+    elif Path("/sys/class/net", config["lan"], "wireless").exists():
+        raise RuntimeError("El modo router/AP utiliza una interfaz Ethernet hacia su puerto LAN.")
+    return {
+        "original_managed": managed,
+        "original_up": "UP" in lan.get("flags", []),
+        "original_forward": linux_command(["sysctl", "-n", "net.ipv4.ip_forward"]),
+    }
+
+
+@contextmanager
+def portal_keyfile(config, connection):
+    directory = Path("/run/NetworkManager/system-connections")
+    directory.mkdir(mode=0o700, parents=True, exist_ok=True)
+    profile = directory / f"polterheist-{uuid.UUID(connection)}.nmconnection"
+    descriptor = os.open(profile, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
+            stream.write(portal_profile(config, connection))
+        yield profile
+    finally:
+        profile.unlink(missing_ok=True)
+
+
+def portal_verify_restored(config, state):
+    managed, connection = linux_nm_state(config["lan"])
+    links = json.loads(linux_command(["ip", "-json", "address", "show", "dev", config["lan"]]))
+    if (
+        managed != state["original_managed"]
+        or connection is not None
+        or len(links) != 1
+        or ("UP" in links[0].get("flags", [])) != state["original_up"]
+        or any(a.get("scope") == "global" for a in links[0].get("addr_info", []))
+        or linux_command(["sysctl", "-n", "net.ipv4.ip_forward"]) != state["original_forward"]
+    ):
+        raise RuntimeError("No se confirmó la restauración de la interfaz/forwarding originales.")
+
+
+@contextmanager
+def portal_lock():
+    import fcntl  # Linux only; importing POLTERHEIST remains possible on Windows.
+
+    with Path("/run/polterheist-portal.lock").open("a") as lock:
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError as error:
+            raise RuntimeError("Ya hay un portal POLTERHEIST activo.") from error
+        yield
+
+
+@contextmanager
+def portal_network(config, folder):
+    with portal_lock():
+        state = portal_preflight(config)
+        connection = str(uuid.uuid4())
+        table = "polterheist_" + uuid.uuid4().hex[:12]
+        state.update(
+            connection_uuid=connection,
+            nft_table=table,
+            lan=config["lan"],
+            mode=config["mode"],
+            restored=None,
+            status="preparing",
+        )
+        dump_json(folder / "network.json", state)
+        rules = portal_nft_rules(config, table)
+        portal_nft(rules, check=True)
+        loaded = changed = firewall = False
+        with portal_keyfile(config, connection) as profile:
+            try:
+                firewall = True
+                portal_nft(rules)  # Block client forwarding before enabling DHCP/NAT.
+                changed = True
+                linux_command(["nmcli", "device", "set", config["lan"], "managed", "yes"])
+                loaded = True
+                linux_command(["nmcli", "connection", "load", str(profile)])
+                linux_command(
+                    [
+                        "nmcli",
+                        "--wait",
+                        "30",
+                        "connection",
+                        "up",
+                        "uuid",
+                        connection,
+                        "ifname",
+                        config["lan"],
+                    ],
+                    timeout=35,
+                )
+                current = linux_nm_state(config["lan"])
+                if current != (True, connection):
+                    raise RuntimeError("NetworkManager no confirmó la conexión del portal.")
+                addresses = json.loads(
+                    linux_command(["ip", "-json", "address", "show", "dev", config["lan"]])
+                )
+                expected = str(ipaddress.IPv4Network(config["network"])[1])
+                if not any(
+                    a.get("local") == expected for i in addresses for a in i.get("addr_info", [])
+                ):
+                    raise RuntimeError("La interfaz no tiene la dirección de la pasarela.")
+                state["status"] = "active"
+                dump_json(folder / "network.json", state)
+                yield table, state
+            finally:
+                errors = []
+
+                def restore(action):
+                    try:
+                        action()
+                    except (Exception, KeyboardInterrupt) as error:
+                        errors.append(str(error) or "Restauración interrumpida")
+
+                def remove_connection():
+                    # Deletion deactivates this UUID only and removes the temporary keyfile.
+                    present = run_quiet(["nmcli", "connection", "show", "uuid", connection])
+                    if present is None:
+                        raise RuntimeError("No se pudo consultar la conexión temporal")
+                    if present.returncode == 0:
+                        linux_command(
+                            ["nmcli", "--wait", "15", "connection", "delete", "uuid", connection]
+                        )
+
+                if loaded:
+                    restore(remove_connection)
+                if changed:
+                    restore(
+                        lambda: linux_command(
+                            ["nmcli", "device", "set", config["lan"], "managed", "no"]
+                        )
+                    )
+                    restore(
+                        lambda: linux_command(["ip", "link", "set", "dev", config["lan"], "down"])
+                    )
+                    if config["mode"] == "wifi":
+                        restore(
+                            lambda: linux_command(
+                                ["iw", "dev", config["lan"], "set", "type", "managed"]
+                            )
+                        )
+                    restore(
+                        lambda: linux_command(
+                            [
+                                "nmcli",
+                                "device",
+                                "set",
+                                config["lan"],
+                                "managed",
+                                "yes" if state["original_managed"] else "no",
+                            ]
+                        )
+                    )
+                    restore(
+                        lambda: linux_command(
+                            [
+                                "ip",
+                                "link",
+                                "set",
+                                "dev",
+                                config["lan"],
+                                "up" if state["original_up"] else "down",
+                            ]
+                        )
+                    )
+                    restore(
+                        lambda: linux_command(
+                            ["sysctl", "-w", "net.ipv4.ip_forward=" + state["original_forward"]]
+                        )
+                    )
+                    if not errors:
+                        restore(lambda: portal_verify_restored(config, state))
+                # Keep the guard if cleanup fails; do not accidentally leave an open gateway.
+                if firewall and not errors:
+                    present = run_quiet(["nft", "list", "table", "inet", table])
+                    if present is None:
+                        errors.append("No se pudo consultar la tabla de protección")
+                    elif present.returncode == 0:
+                        restore(lambda: portal_nft(f"delete table inet {table}\n"))
+                state.update(
+                    restored=not errors,
+                    status="stopped" if not errors else "restore_failed",
+                    restore_errors=errors,
+                )
+                dump_json(folder / "network.json", state)
+                for error in errors:
+                    print("  Restauración pendiente: " + safe_text(error))
+                if errors:
+                    print(
+                        f"  Protección conservada: {table}. Estado guardado en {folder / 'network.json'}"
+                    )
+
+
+def portal_run(config):
+    folder = report_folder("portal")
+    folder.chmod(0o700)
+    dump_json(folder / "config.json", {k: v for k, v in config.items() if k != "password"})
+    previous = signal.getsignal(signal.SIGTERM)
+
+    def interrupted(*_):
+        raise KeyboardInterrupt
+
+    signal.signal(signal.SIGTERM, interrupted)
+    try:
+        with portal_network(config, folder) as (table, state):
+            network = ipaddress.IPv4Network(config["network"])
+            access = PortalAccess(
+                str(network),
+                lambda ip: portal_identity(config["lan"], ip),
+                lambda ip, mac, seconds: portal_grant(table, ip, mac, seconds),
+                config.get("session_seconds", 3600),
+            )
+            with PortalServer(
+                (str(network[1]), 8080), config.get("ssid") or "Bienvenido", access
+            ) as server:
+                print(
+                    f"  Portal activo: http://{network[1]}:8080 | Ctrl+C para detener y restaurar."
+                )
+                print(
+                    "  Si el dispositivo no abre el portal, entra en esa dirección desde su navegador."
+                )
+                try:
+                    server.serve_forever(poll_interval=0.25)
+                except KeyboardInterrupt:
+                    pass
+    finally:
+        signal.signal(signal.SIGTERM, previous)
+        print(f"  Estado del portal: {folder}")
+
+
+def captive_portal():
+    print(tint("\nPOLTERHEIST :: CAPTIVE PORTAL"))
+    print("  [1] Crear una Wi-Fi (nombre y contraseña a elegir) — Kali/Linux")
+    print("  [2] Usar un router como punto de acceso — Kali/Linux")
+    print("  [v] Vista previa local — Windows/Linux\n  [q] Volver")
+    choice = input("  > ").strip().lower()
+    if choice == "v":
+        return portal_preview()
+    if choice not in {"1", "2"}:
+        return
+    require_linux()
+    if os.geteuid() != 0:
+        require_tools("sudo")
+        return subprocess.run(
+            ["sudo", "--", sys.executable, str(BASE / "script.py"), "--portal"], check=False
+        ).returncode
+    require_tools("ip", "nmcli", "nft", "dnsmasq")
+    print(
+        "  Se necesitan dos interfaces: Internet y clientes. La interfaz de clientes debe estar libre."
+    )
+    routes = json.loads(linux_command(["ip", "-json", "-4", "route", "show"]))
+    defaults = sorted(
+        (r for r in routes if r.get("dst") == "default" and r.get("dev")),
+        key=lambda r: r.get("metric", 0),
+    )
+    if not defaults:
+        raise RuntimeError("Conecta primero el equipo a Internet.")
+    wan = defaults[0]["dev"]
+    print("  Salida a Internet: " + safe_text(wan))
+    radios = detect_wireless_interfaces() if choice == "1" else []
+    links = json.loads(linux_command(["ip", "-json", "address", "show"]))
+    candidates = [
+        i
+        for i in links
+        if i["ifname"] != wan
+        and i.get("link_type") == "ether"
+        and not i.get("master")
+        and not any(a.get("scope") == "global" for a in i.get("addr_info", []))
+    ]
+    if choice == "1":
+        candidates = [
+            i
+            for i in candidates
+            if any(r["name"] == i["ifname"] and "AP" in r["capabilities"] for r in radios)
+        ]
+    else:
+        print("  Conecta un puerto LAN del router a la interfaz de clientes del PC.")
+        print(
+            "  El router debe estar en modo AP/bridge, con DHCP desactivado y sin otra salida a Internet."
+        )
+        print("  Los clientes conservarán el nombre Wi-Fi configurado en ese router.")
+        candidates = [
+            i for i in candidates if not Path("/sys/class/net", i["ifname"], "wireless").exists()
+        ]
+    if not candidates:
+        raise RuntimeError(
+            "No hay una segunda interfaz libre compatible. Wi-Fi y Ethernet, o dos adaptadores, son necesarios."
+        )
+    selected = select_item(
+        [dict(i, name=i["ifname"]) for i in candidates], "Interfaz para clientes"
+    )
+    if selected is None:
+        return
+    used = [
+        ipaddress.IPv4Network(r["dst"], strict=False)
+        for r in routes
+        if r.get("dst") not in (None, "default")
+    ]
+    network = next(
+        (
+            f"10.77.{n}.0/24"
+            for n in range(256)
+            if not any(ipaddress.IPv4Network(f"10.77.{n}.0/24").overlaps(r) for r in used)
+        ),
+        None,
+    )
+    if network is None:
+        raise RuntimeError("No se encontró una subred libre para el portal.")
+    config = {
+        "mode": "wifi" if choice == "1" else "router",
+        "lan": selected["ifname"],
+        "wan": wan,
+        "network": network,
+        "session_seconds": 3600,
+    }
+    if choice == "1":
+        config["ssid"] = (
+            input("  Nombre de la nueva Wi-Fi [POLTERHEIST]: ").strip() or "POLTERHEIST"
+        )
+        config["password"] = getpass.getpass("  Contraseña Wi-Fi (8–63 caracteres): ")
+        radio = next(r for r in radios if r["name"] == config["lan"])
+        channels = [
+            f["channel"]
+            for f in radio["frequencies"]
+            if 1 <= f["channel"] <= 11
+            and not (f["disabled"] or f["no_ir"] or f["radar"])
+            and f["frequency_mhz"] < 2500
+        ]
+        if not channels:
+            raise RuntimeError("La radio no tiene canales permitidos para crear el AP.")
+        config["channel"] = next((c for c in (1, 6, 11) if c in channels), channels[0])
+    elif (
+        input("  Escribe AP cuando el router esté configurado y conectado como se indica: ").strip()
+        != "AP"
+    ):
+        return
+    portal_validate(config)
+    return portal_run(config)
+
+
 def load_profile(path=None):
     path = PROFILE_PATH if path is None else Path(path)
     if not path.exists():
@@ -3024,7 +3710,19 @@ def main(argv=None):
         help="Abrir directamente el descubrimiento Wi-Fi y la evaluación WPS",
     )
     parser.add_argument("--windows-elevated", action="store_true", help=argparse.SUPPRESS)
+    parser.add_argument(
+        "--portal", action="store_true", help="Abrir el asistente de portal cautivo"
+    )
+    parser.add_argument(
+        "--portal-preview",
+        action="store_true",
+        help="Ver el portal en localhost, sin modificar la red",
+    )
     options = parser.parse_args(argv)
+    if (options.portal or options.portal_preview) and (
+        options.wireless or options.ssid or options.bssid
+    ):
+        parser.error("El portal y el fingerprint deben ejecutarse por separado.")
     if options.setup:
         try:
             return setup_environment()
@@ -3072,6 +3770,14 @@ def main(argv=None):
         return 0
     print(tint(BANNER))
     print(tint(f"  POLTERHEIST :: WATCHING THE WIRE :: v{VERSION}", AMBER))
+    if options.portal or options.portal_preview:
+        try:
+            return (portal_preview() if options.portal_preview else captive_portal()) or 0
+        except (KeyboardInterrupt, EOFError):
+            return 130
+        except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as error:
+            print(tint("  [!] " + safe_text(error), AMBER))
+            return 1
     if options.wireless:
         try:
             if options.windows_elevated and not windows_is_admin():
@@ -3091,7 +3797,11 @@ def main(argv=None):
                 except (KeyboardInterrupt, EOFError):
                     pass
     while True:
-        print(tint("\n[0] WHO AM I?\n[1] LAN RECON\n[2] WIRELESS RECON\n\n[q] EXIT"))
+        print(
+            tint(
+                "\n[0] WHO AM I?\n[1] LAN RECON\n[2] WIRELESS RECON\n[3] CAPTIVE PORTAL\n\n[q] EXIT"
+            )
+        )
         try:
             choice = input("  > ").strip().lower()
         except (KeyboardInterrupt, EOFError):
@@ -3099,7 +3809,9 @@ def main(argv=None):
             return 0
         if choice == "q":
             return 0
-        action = {"0": who_am_i, "1": lan_recon, "2": wireless_recon}.get(choice)
+        action = {"0": who_am_i, "1": lan_recon, "2": wireless_recon, "3": captive_portal}.get(
+            choice
+        )
         if action is None:
             print("  Opción no válida.")
             continue

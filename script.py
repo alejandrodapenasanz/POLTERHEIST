@@ -3552,12 +3552,13 @@ def portal_run(config):
         print(f"  Estado del portal: {folder}")
 
 
-def captive_portal():
+def captive_portal(choice=None):
     print(tint("\nPOLTERHEIST :: CAPTIVE PORTAL"))
     print("  [1] Crear una Wi-Fi (nombre y contraseña a elegir) — Kali/Linux")
     print("  [2] Usar un router como punto de acceso — Kali/Linux")
     print("  [v] Vista previa local — Windows/Linux\n  [q] Volver")
-    choice = input("  > ").strip().lower()
+    if choice is None:
+        choice = input("  > ").strip().lower()
     if choice == "v":
         return portal_preview()
     if choice not in {"1", "2"}:
@@ -3566,7 +3567,16 @@ def captive_portal():
     if os.geteuid() != 0:
         require_tools("sudo")
         return subprocess.run(
-            ["sudo", "--", sys.executable, str(BASE / "script.py"), "--portal"], check=False
+            [
+                "sudo",
+                "--",
+                sys.executable,
+                str(BASE / "script.py"),
+                "--portal",
+                "--portal-choice",
+                choice,
+            ],
+            check=False,
         ).returncode
     require_tools("ip", "nmcli", "nft", "dnsmasq")
     print(
@@ -3715,6 +3725,7 @@ def main(argv=None):
         help="Abrir directamente el descubrimiento Wi-Fi y la evaluación WPS",
     )
     parser.add_argument("--windows-elevated", action="store_true", help=argparse.SUPPRESS)
+    parser.add_argument("--portal-choice", choices=("1", "2"), help=argparse.SUPPRESS)
     parser.add_argument(
         "--portal", action="store_true", help="Abrir el asistente de portal cautivo"
     )
@@ -3724,6 +3735,8 @@ def main(argv=None):
         help="Ver el portal en localhost, sin modificar la red",
     )
     options = parser.parse_args(argv)
+    if options.portal_choice:
+        options.portal = True
     if (options.portal or options.portal_preview) and (
         options.wireless or options.ssid or options.bssid
     ):
@@ -3777,7 +3790,11 @@ def main(argv=None):
     print(tint(f"  POLTERHEIST :: WATCHING THE WIRE :: v{VERSION}", AMBER))
     if options.portal or options.portal_preview:
         try:
-            return (portal_preview() if options.portal_preview else captive_portal()) or 0
+            if options.portal_preview:
+                return portal_preview() or 0
+            return (
+                captive_portal(options.portal_choice) if options.portal_choice else captive_portal()
+            ) or 0
         except (KeyboardInterrupt, EOFError):
             return 130
         except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as error:

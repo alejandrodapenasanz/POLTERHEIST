@@ -175,7 +175,9 @@ finally: c.close()
             run(["ip", "address", "del", "10.77.0.1/24", "dev", "portal0"], gateway)
             run(["ip", "route", "add", "default", "via", "198.18.0.2"], gateway)
             bus_address = "unix:path=" + str(folder / "bus")
-            environment = dict(os.environ, DBUS_SYSTEM_BUS_ADDRESS=bus_address)
+            environment = dict(
+                os.environ, DBUS_SYSTEM_BUS_ADDRESS=bus_address, XDG_RUNTIME_DIR=directory
+            )
             processes.append(
                 subprocess.Popen(
                     [
@@ -188,6 +190,7 @@ finally: c.close()
                         "--nofork",
                         "--address=" + bus_address,
                     ],
+                    env=environment,
                     stdout=logfile,
                     stderr=subprocess.STDOUT,
                 )
@@ -212,7 +215,7 @@ finally: c.close()
                         "exec",
                         gateway,
                         "NetworkManager",
-                        "--no-daemon",
+                        "--debug",
                         "--config=" + str(folder / "NetworkManager.conf"),
                         "--config-dir=" + str(folder / "empty"),
                         "--system-config-dir=" + str(folder / "empty"),
@@ -226,17 +229,19 @@ finally: c.close()
                 )
             )
             deadline = time.monotonic() + 15
-            while (
-                run(
+            while True:
+                probe = run(
                     ["nmcli", "-g", "GENERAL.NM-MANAGED", "device", "show", "portal0"],
                     gateway,
                     env=environment,
                     check=False,
-                ).stdout.strip()
-                != "yes"
-            ):
+                )
+                if probe.returncode == 0 and probe.stdout.strip() in {"yes", "no"}:
+                    break
                 if processes[-1].poll() is not None or time.monotonic() > deadline:
-                    raise RuntimeError((folder / "services.log").read_text())
+                    raise RuntimeError(
+                        probe.stdout + probe.stderr + (folder / "services.log").read_text()
+                    )
                 time.sleep(0.2)
             lifecycle_code = """
 import sys, json, socket, errno

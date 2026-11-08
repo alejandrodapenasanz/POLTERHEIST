@@ -28,6 +28,19 @@ MAC = "02:00:00:00:00:02"
 
 
 class PortalTests(unittest.TestCase):
+    def test_elevation_keeps_selected_portal_mode(self):
+        with (
+            patch.object(app, "require_linux"),
+            patch.object(app, "require_tools"),
+            patch.object(app.os, "geteuid", return_value=1000, create=True),
+            patch.object(app.subprocess, "run", return_value=Mock(returncode=0)) as run,
+            patch("builtins.input") as prompt,
+            contextlib.redirect_stdout(io.StringIO()),
+        ):
+            self.assertEqual(app.captive_portal("2"), 0)
+        prompt.assert_not_called()
+        self.assertEqual(run.call_args.args[0][-2:], ["--portal-choice", "2"])
+
     def test_menu_and_cli_route_to_portal(self):
         for args, answers in (([], ["3", "q"]), (["--portal"], [])):
             with (

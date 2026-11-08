@@ -214,6 +214,18 @@ finally: c.close()
                         "netns",
                         "exec",
                         gateway,
+                        "unshare",
+                        "--mount",
+                        "--propagation",
+                        "private",
+                        sys.executable,
+                        "-c",
+                        # udev does not follow moved interfaces into netns. A private,
+                        # read-only /sys lets NM use its container/netlink backend.
+                        "import os, subprocess, sys; "
+                        "subprocess.run(['mount', '--bind', '/sys', '/sys'], check=True); "
+                        "subprocess.run(['mount', '-o', 'remount,bind,ro', '/sys'], check=True); "
+                        "os.execvp(sys.argv[1], sys.argv[1:])",
                         "NetworkManager",
                         "--debug",
                         "--config=" + str(folder / "NetworkManager.conf"),

@@ -251,6 +251,8 @@ Los informes incluyen versión, hora UTC, objetivo, autorización, fuentes, clas
 
 ## Pruebas
 
+El portal tiene pruebas HTTP reales en loopback, validación de formularios y tokens por IP/MAC, caducidad y restauración tras fallo o cancelación. El trabajo `portal-gateway` crea tres espacios de red Linux aislados: comprueba la redirección HTTP, el bloqueo del tráfico antes de aceptar, el acceso posterior, la caducidad y la conservación de reglas ajenas. También valida los perfiles con el parser real de NetworkManager y ejecuta su ciclo de activación/restauración usando un D-Bus privado. Estas pruebas no se conectan a redes Wi-Fi ni modifican el router del usuario.
+
 ```bash
 .venv/bin/python -m unittest discover -s tests -v
 ```

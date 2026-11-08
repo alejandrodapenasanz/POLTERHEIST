@@ -163,7 +163,10 @@ class PortalTests(unittest.TestCase):
                 )
                 response = connection.getresponse()
                 self.assertEqual(response.status, 303)
-                self.assertEqual(response.getheader("Location"), "/connected")
+                self.assertEqual(
+                    response.getheader("Location"),
+                    f"http://127.0.0.1:{server.server_port}/connected",
+                )
                 response.read()
                 grant.assert_called_once_with("127.0.0.1", MAC, 3600)
                 server.access = None

@@ -139,8 +139,10 @@ finally: c.close()
             import re
             from urllib.parse import urlencode
 
-            page = request()
-            assert page["status"] == 200 and "ORIGIN_FIXTURE" not in page["body"], page
+            captured = request()
+            assert captured["status"] == 302 and "ORIGIN_FIXTURE" not in captured["body"], captured
+            page = request("10.77.0.1", 8080)
+            assert page["status"] == 200, page
             token = re.search(r'name="token" value="([^"]+)"', page["body"])[1]
             assert "blocked" in request(port=8443), "Unauthenticated non-HTTP traffic escaped"
             forged = request(
@@ -159,12 +161,122 @@ finally: c.close()
             assert request(port=8443)["body"] == "ORIGIN_FIXTURE", "Authenticated TCP did not pass"
             time.sleep(11)
             assert "blocked" in request(port=8443), "Expired client retained Internet access"
-            assert 'name="token"' in request()["body"], "Expired HTTP did not return to portal"
+            assert request()["status"] == 302, "Expired HTTP did not return to portal"
+            assert 'name="token"' in request("10.77.0.1", 8080)["body"]
             run(["nft", "delete", "table", "inet", table], gateway)
             run(["nft", "list", "table", "inet", "fixture_keep"], gateway)
             assert (
                 run(["nft", "list", "table", "inet", table], gateway, check=False).returncode != 0
             )
+            # Exercise actual NetworkManager loading, shared DHCP/NAT, and rollback
+            # on the isolated gateway using a private D-Bus (never the host daemon).
+            processes[1].terminate()
+            processes[1].wait(timeout=5)
+            run(["ip", "address", "del", "10.77.0.1/24", "dev", "portal0"], gateway)
+            run(["ip", "route", "add", "default", "via", "198.18.0.2"], gateway)
+            bus_address = "unix:path=" + str(folder / "bus")
+            environment = dict(os.environ, DBUS_SYSTEM_BUS_ADDRESS=bus_address)
+            processes.append(
+                subprocess.Popen(
+                    [
+                        "ip",
+                        "netns",
+                        "exec",
+                        gateway,
+                        "dbus-daemon",
+                        "--session",
+                        "--nofork",
+                        "--address=" + bus_address,
+                    ],
+                    stdout=logfile,
+                    stderr=subprocess.STDOUT,
+                )
+            )
+            deadline = time.monotonic() + 10
+            while not (folder / "bus").exists():
+                if time.monotonic() > deadline:
+                    raise RuntimeError("Private test D-Bus did not start")
+                time.sleep(0.1)
+            (folder / "empty").mkdir()
+            (folder / "NetworkManager.conf").write_text(
+                "[main]\nplugins=keyfile\nno-auto-default=*\ndns=none\nrc-manager=unmanaged\n"
+                "auth-polkit=root-only\nhostname-mode=none\n"
+                "[device-portal]\nmatch-device=interface-name:portal0\nmanaged=1\n"
+                "[device-uplink]\nmatch-device=interface-name:uplink0\nmanaged=0\n"
+            )
+            processes.append(
+                subprocess.Popen(
+                    [
+                        "ip",
+                        "netns",
+                        "exec",
+                        gateway,
+                        "NetworkManager",
+                        "--no-daemon",
+                        "--config=" + str(folder / "NetworkManager.conf"),
+                        "--config-dir=" + str(folder / "empty"),
+                        "--system-config-dir=" + str(folder / "empty"),
+                        "--intern-config=" + str(folder / "intern.conf"),
+                        "--pid-file=" + str(folder / "nm.pid"),
+                        "--state-file=" + str(folder / "nm.state"),
+                    ],
+                    env=environment,
+                    stdout=logfile,
+                    stderr=subprocess.STDOUT,
+                )
+            )
+            deadline = time.monotonic() + 15
+            while (
+                run(
+                    ["nmcli", "-g", "GENERAL.NM-MANAGED", "device", "show", "portal0"],
+                    gateway,
+                    env=environment,
+                    check=False,
+                ).stdout.strip()
+                != "yes"
+            ):
+                if processes[-1].poll() is not None or time.monotonic() > deadline:
+                    raise RuntimeError((folder / "services.log").read_text())
+                time.sleep(0.2)
+            lifecycle_code = """
+import sys, json, socket, errno
+from pathlib import Path
+import script as app
+config = json.loads(sys.argv[1]); folder = Path(sys.argv[2])
+with app.portal_network(config, folder) as (table, state):
+    assert state["status"] == "active"
+    assert app.linux_nm_state(config["lan"])[1] == state["connection_uuid"]
+    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as probe:
+        try: probe.bind(("10.77.0.1", 53))
+        except OSError as error: assert error.errno == errno.EADDRINUSE
+        else: raise AssertionError("Shared DNS was not listening")
+assert state["restored"], state
+assert app.linux_nm_state(config["lan"])[1] is None
+print("PASS: real NetworkManager activation, shared DNS, and verified cleanup")
+"""
+            lifecycle = subprocess.run(
+                [
+                    "ip",
+                    "netns",
+                    "exec",
+                    gateway,
+                    sys.executable,
+                    "-c",
+                    lifecycle_code,
+                    json.dumps(config),
+                    directory,
+                ],
+                env=environment,
+                text=True,
+                capture_output=True,
+                timeout=90,
+                cwd=app.BASE,
+            )
+            if lifecycle.returncode:
+                raise RuntimeError(
+                    lifecycle.stdout + lifecycle.stderr + (folder / "services.log").read_text()
+                )
+            print(lifecycle.stdout.strip())
             print(
                 "PASS: real isolated routing, captive HTTP, denied TCP, token validation, access, expiry, scoped cleanup, and NetworkManager profile parsing"
             )

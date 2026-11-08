@@ -3227,6 +3227,10 @@ class PortalHandler(http.server.BaseHTTPRequestHandler):
         if self.server.access is None:
             self.reply(200, portal_page(self.server.title, preview=True))
             return
+        address, port = self.server.server_address
+        if self.headers.get("Host") != f"{address}:{port}":
+            self.reply(302, location=f"http://{address}:{port}/")
+            return
         try:
             token = self.server.access.page(self.client_address[0])
             self.reply(200, portal_page(self.server.title, token, connected=token is None))
@@ -3252,7 +3256,8 @@ class PortalHandler(http.server.BaseHTTPRequestHandler):
             if fields.get("accept") != ["yes"] or len(fields.get("token", [])) != 1:
                 raise ValueError("Formulario no válido")
             self.server.access.accept(self.client_address[0], fields["token"][0])
-            self.reply(303, location="/connected")
+            address, port = self.server.server_address
+            self.reply(303, location=f"http://{address}:{port}/connected")
         except (ValueError, UnicodeError, RuntimeError, subprocess.SubprocessError) as error:
             self.reply(403, html.escape(str(error)))
 

@@ -9,7 +9,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Install isolated gateway test dependencies
-        run: sudo apt-get update && sudo apt-get install -y network-manager nftables iproute2
+        run: sudo apt-get update && sudo apt-get install -y network-manager dnsmasq-base nftables iproute2 dbus
       - name: Real captive portal in isolated network namespaces
         run: sudo python3 tests/portal_netns_smoke.py
   test:

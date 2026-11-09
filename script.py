@@ -28,7 +28,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
-VERSION = "2.5.0"
+VERSION = "2.5.1"
 BASE = Path(__file__).resolve().parent
 PROFILE_PATH = BASE / "config" / "profile.json"
 REPORTS = BASE / "reports"
@@ -3272,13 +3272,146 @@ def portal_preview():
             pass
 
 
+def portal_candidate_rows(links, radios, wan, mode):
+    rows = []
+    for link in links:
+        name = link["ifname"]
+        radio = next((r for r in (radios or []) if r["name"] == name), None)
+        kind = link.get("linkinfo", {}).get("info_kind", "")
+        category = "Wi-Fi" if radio else kind or link.get("link_type", "?")
+        if name == wan:
+            reason = "Salida a Internet; en uso"
+        elif link.get("link_type") != "ether":
+            reason = "No transporta clientes Ethernet/Wi-Fi"
+        elif link.get("master") or kind == "bridge":
+            reason = "Puente de otra red; no es una interfaz libre"
+        elif mode == "wifi" and radio is None:
+            reason = "Ethernet no puede emitir una Wi-Fi"
+        elif mode == "wifi" and "AP" not in radio.get("capabilities", []):
+            reason = "El controlador no anuncia modo AP"
+        elif mode == "router" and radio is not None:
+            reason = "Se necesita Ethernet hacia el router/AP"
+        elif any(a.get("scope") == "global" for a in link.get("addr_info", [])):
+            reason = "Tiene direcciones asignadas; en uso"
+        else:
+            reason = "Disponible para comprobar"
+        rows.append(
+            {
+                "name": name,
+                "type": category,
+                "reason": reason,
+                "candidate": reason == "Disponible para comprobar",
+                "link": link,
+            }
+        )
+    return rows
+
+
+def portal_virtualization():
+    result = run_quiet(["systemd-detect-virt"], timeout=5)
+    return result.stdout.strip() if result is not None and result.returncode == 0 else None
+
+
+def portal_explain_interfaces(links, radios, wan, mode, virtualization=None):
+    print(tint("\nPOLTERHEIST :: PORTAL / INTERFACES"))
+    table(
+        ["INTERFAZ", "TIPO", "DISPONIBILIDAD"],
+        [
+            [r["name"], r["type"], r["reason"]]
+            for r in portal_candidate_rows(links, radios, wan, mode)
+        ],
+        [16, 12, 52],
+    )
+    if virtualization:
+        label = "VirtualBox" if virtualization == "oracle" else virtualization
+        print("  Entorno virtual detectado: " + safe_text(label))
+    if radios is None:
+        print("  No se pudo comprobar la presencia de antenas Wi-Fi; revisa iw y el controlador.")
+    elif not radios:
+        print(
+            "  Linux no detecta ninguna antena Wi-Fi. No puede crear un SSID ni ejecutar el fingerprint inalámbrico."
+        )
+        if virtualization:
+            print(
+                "  Poner la VM en modo puente sobre el Wi-Fi del host no le entrega la antena: sigue siendo Ethernet virtual."
+            )
+            print(
+                "  Para emitir Wi-Fi: conecta una antena USB compatible directamente a la VM, o arranca Kali Live en el PC."
+            )
+    if mode == "wifi":
+        print(
+            "  Alternativa con una sola antena: Internet por cable Ethernet o USB tethering del móvil y Wi-Fi libre para el AP."
+        )
+        print(
+            "  Cliente + AP en una misma radio depende del controlador y no está implementado en este portal."
+        )
+    else:
+        print(
+            "  Para un router/AP externo hace falta una interfaz Ethernet de clientes separada de la salida a Internet."
+        )
+        if virtualization:
+            print(
+                "  Un segundo adaptador virtual permite un laboratorio; para un AP físico debe conectarse al Ethernet físico dedicado."
+            )
+    print(
+        "  La vista previa [3] → [v] funciona sin una segunda interfaz, pero no controla el acceso de otros equipos."
+    )
+
+
+def portal_check():
+    require_linux()
+    require_tools("ip")
+    links = json.loads(linux_command(["ip", "-json", "-details", "address", "show"]))
+    routes = json.loads(linux_command(["ip", "-json", "-4", "route", "show"]))
+    defaults = sorted(
+        (r for r in routes if r.get("dst") == "default" and r.get("dev")),
+        key=lambda r: r.get("metric", 0),
+    )
+    wan = defaults[0]["dev"] if defaults else None
+    radios = None
+    if shutil.which("iw"):
+        try:
+            radios = detect_wireless_interfaces()
+        except RuntimeError as error:
+            print("  No se pudieron consultar las radios: " + safe_text(error))
+    else:
+        print("  Falta iw; instala las dependencias con --setup para consultar las radios.")
+    portal_explain_interfaces(links, radios, wan, "wifi", portal_virtualization())
+    if not wan:
+        print("  No hay ruta predeterminada IPv4 para compartir Internet.")
+    if shutil.which("nft"):
+        firewall = run_quiet(["nft", "--json", "list", "ruleset"])
+        if firewall is not None and firewall.returncode == 0:
+            hooks = sorted(
+                {
+                    x["chain"]["table"]
+                    for x in json.loads(firewall.stdout).get("nftables", [])
+                    if x.get("chain", {}).get("hook") in {"input", "forward"}
+                }
+            )
+            if hooks:
+                print(
+                    "  Otro firewall/pasarela está activo: "
+                    + safe_text(", ".join(hooks))
+                    + ". El portal actual no modifica esas reglas."
+                )
+        else:
+            print("  Para comprobar también el firewall, ejecuta --portal-check con sudo.")
+    return 0
+
+
 def portal_preflight(config):
     require_linux(root=True)
     require_tools("nmcli", "ip", "nft", "sysctl", "dnsmasq")
     network = portal_validate(config)
-    links = json.loads(linux_command(["ip", "-json", "address", "show"]))
+    links = json.loads(linux_command(["ip", "-json", "-details", "address", "show"]))
     lan = next((i for i in links if i["ifname"] == config["lan"]), None)
-    if lan is None or lan.get("link_type") != "ether" or lan.get("master"):
+    if (
+        lan is None
+        or lan.get("link_type") != "ether"
+        or lan.get("master")
+        or lan.get("linkinfo", {}).get("info_kind") == "bridge"
+    ):
         raise RuntimeError(
             "Usa una interfaz de clientes Ethernet/Wi-Fi dedicada, fuera de bridges."
         )
@@ -3579,6 +3712,8 @@ def captive_portal(choice=None):
             check=False,
         ).returncode
     require_tools("ip", "nmcli", "nft", "dnsmasq")
+    if choice == "1":
+        require_tools("iw")
     print(
         "  Se necesitan dos interfaces: Internet y clientes. La interfaz de clientes debe estar libre."
     )
@@ -3591,23 +3726,13 @@ def captive_portal(choice=None):
         raise RuntimeError("Conecta primero el equipo a Internet.")
     wan = defaults[0]["dev"]
     print("  Salida a Internet: " + safe_text(wan))
-    radios = detect_wireless_interfaces() if choice == "1" else []
-    links = json.loads(linux_command(["ip", "-json", "address", "show"]))
+    radios = detect_wireless_interfaces() if shutil.which("iw") else None
+    links = json.loads(linux_command(["ip", "-json", "-details", "address", "show"]))
+    mode = "wifi" if choice == "1" else "router"
     candidates = [
-        i
-        for i in links
-        if i["ifname"] != wan
-        and i.get("link_type") == "ether"
-        and not i.get("master")
-        and not any(a.get("scope") == "global" for a in i.get("addr_info", []))
+        r["link"] for r in portal_candidate_rows(links, radios, wan, mode) if r["candidate"]
     ]
-    if choice == "1":
-        candidates = [
-            i
-            for i in candidates
-            if any(r["name"] == i["ifname"] and "AP" in r["capabilities"] for r in radios)
-        ]
-    else:
+    if choice == "2":
         print("  Conecta un puerto LAN del router a la interfaz de clientes del PC.")
         print(
             "  El router debe estar en modo AP/bridge, con DHCP desactivado y sin otra salida a Internet."
@@ -3617,8 +3742,9 @@ def captive_portal(choice=None):
             i for i in candidates if not Path("/sys/class/net", i["ifname"], "wireless").exists()
         ]
     if not candidates:
+        portal_explain_interfaces(links, radios, wan, mode, portal_virtualization())
         raise RuntimeError(
-            "No hay una segunda interfaz libre compatible. Wi-Fi y Ethernet, o dos adaptadores, son necesarios."
+            "La topología actual no ofrece una interfaz de clientes compatible. Consulta el diagnóstico anterior; añadir Ethernet virtual no crea una antena Wi-Fi."
         )
     selected = select_item(
         [dict(i, name=i["ifname"]) for i in candidates], "Interfaz para clientes"
@@ -3725,6 +3851,11 @@ def main(argv=None):
         help="Abrir directamente el descubrimiento Wi-Fi y la evaluación WPS",
     )
     parser.add_argument("--windows-elevated", action="store_true", help=argparse.SUPPRESS)
+    parser.add_argument(
+        "--portal-check",
+        action="store_true",
+        help="Diagnóstico del portal y de las interfaces, sin modificar la red",
+    )
     parser.add_argument("--portal-choice", choices=("1", "2"), help=argparse.SUPPRESS)
     parser.add_argument(
         "--portal", action="store_true", help="Abrir el asistente de portal cautivo"
@@ -3745,6 +3876,12 @@ def main(argv=None):
         try:
             return setup_environment()
         except (OSError, RuntimeError, subprocess.SubprocessError) as error:
+            print("  [!] " + safe_text(error))
+            return 1
+    if options.portal_check:
+        try:
+            return portal_check()
+        except (OSError, ValueError, RuntimeError) as error:
             print("  [!] " + safe_text(error))
             return 1
     if options.ssid is not None or options.bssid is not None:

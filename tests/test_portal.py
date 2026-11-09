@@ -28,6 +28,71 @@ MAC = "02:00:00:00:00:02"
 
 
 class PortalTests(unittest.TestCase):
+    def test_vm_ethernet_and_docker_do_not_become_wireless_candidates(self):
+        links = [
+            {"ifname": "lo", "link_type": "loopback"},
+            {"ifname": "eth0", "link_type": "ether", "addr_info": [{"scope": "global"}]},
+            {"ifname": "docker0", "link_type": "ether", "linkinfo": {"info_kind": "bridge"}},
+        ]
+        for mode in ("wifi", "router"):
+            rows = app.portal_candidate_rows(links, [], "eth0", mode)
+            self.assertFalse(any(r["candidate"] for r in rows))
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            app.portal_explain_interfaces(links, [], "eth0", "wifi", "oracle")
+        self.assertIn("VirtualBox", output.getvalue())
+        self.assertIn("ninguna antena Wi-Fi", output.getvalue())
+        self.assertIn("sigue siendo Ethernet virtual", output.getvalue())
+        self.assertIn("Kali Live", output.getvalue())
+
+    def test_free_radio_and_free_ethernet_are_distinct_candidates(self):
+        links = [
+            {"ifname": "eth0", "link_type": "ether"},
+            {"ifname": "wlan0", "link_type": "ether"},
+            {"ifname": "eth1", "link_type": "ether"},
+        ]
+        radios = [{"name": "wlan0", "capabilities": ["managed", "AP"]}]
+        for mode, expected in (("wifi", ["wlan0"]), ("router", ["eth1"])):
+            rows = app.portal_candidate_rows(links, radios, "eth0", mode)
+            self.assertEqual([r["name"] for r in rows if r["candidate"]], expected)
+        radios[0]["capabilities"] = ["managed"]
+        self.assertFalse(
+            any(r["candidate"] for r in app.portal_candidate_rows(links, radios, "eth0", "wifi"))
+        )
+
+    def test_portal_diagnostics_are_read_only_and_report_firewall(self):
+        links = [{"ifname": "eth0", "link_type": "ether"}]
+        routes = [{"dst": "default", "dev": "eth0"}]
+        firewall = {"nftables": [{"chain": {"table": "filter", "hook": "forward"}}]}
+        output = io.StringIO()
+        with (
+            patch.object(app, "require_linux"),
+            patch.object(app, "require_tools"),
+            patch.object(app.shutil, "which", return_value="/bin/tool"),
+            patch.object(
+                app, "linux_command", side_effect=[json.dumps(links), json.dumps(routes)]
+            ) as commands,
+            patch.object(app, "detect_wireless_interfaces", return_value=[]),
+            patch.object(app, "portal_virtualization", return_value="oracle"),
+            patch.object(
+                app, "run_quiet", return_value=Mock(returncode=0, stdout=json.dumps(firewall))
+            ) as quiet,
+            contextlib.redirect_stdout(output),
+        ):
+            self.assertEqual(app.portal_check(), 0)
+        self.assertIn("Otro firewall/pasarela", output.getvalue())
+        self.assertTrue(
+            all(c.args[0][0] == "ip" and "show" in c.args[0] for c in commands.call_args_list)
+        )
+        quiet.assert_called_once_with(["nft", "--json", "list", "ruleset"])
+
+    def test_unknown_radio_discovery_is_not_reported_as_no_hardware(self):
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            app.portal_explain_interfaces([], None, None, "wifi")
+        self.assertNotIn("ninguna antena", output.getvalue())
+        self.assertIn("No se pudo comprobar", output.getvalue())
+
     def test_elevation_keeps_selected_portal_mode(self):
         with (
             patch.object(app, "require_linux"),

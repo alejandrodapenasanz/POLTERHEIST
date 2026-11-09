@@ -117,6 +117,19 @@ La prueba se limita a los BSSID del alcance autorizado y bloquea desautenticaci�
 
 ## Portal cautivo multirouter
 
+Si aparece que no hay una interfaz libre, ejecuta `.venv/bin/python script.py --portal-check` (con `sudo` también puede leer el firewall). El diagnóstico muestra cada interfaz y el motivo por el que no se puede usar. Distingue Ethernet virtual, puentes como `docker0`, interfaces ocupadas y radios sin modo AP; no modifica la red.
+
+**Kali en VirtualBox:** el modo puente sobre la Wi-Fi de Windows entrega Ethernet virtual a Kali, no la antena. Añadir otra tarjeta Ethernet virtual no permite emitir un SSID. Para crear una Wi-Fi física desde la VM hace falta una antena USB con soporte AP cedida al invitado. Otra posibilidad es arrancar Kali Live directamente y usar el Ethernet del PC o USB tethering del móvil para Internet, dejando su Wi-Fi disponible para el AP. La compatibilidad AP depende del controlador. Conectar un router/AP físico a una VM requiere un segundo adaptador virtual unido al Ethernet físico dedicado. Una red host-only/interna sirve para un laboratorio de clientes virtuales, no para emitir Wi-Fi. [Redes de VirtualBox](https://docs.oracle.com/en/virtualization/virtualbox/7.1/user/networkingdetails.html).
+
+El portal actual no implementa cliente Wi-Fi y AP simultáneos sobre la misma radio. Algunas combinaciones de controlador/firmware lo admiten, pero eso no proporciona acceso a la antena interna desde una VM.
+
+Para usar un router/AP externo con un PC que ya tiene Wi-Fi y Ethernet, no hace falta comprar otra antena:
+
+1. Apaga Kali normalmente. En VirtualBox, conserva el adaptador de Internet y habilita el **Adaptador 2 → Adaptador puente**, eligiendo el **Ethernet físico** del PC. Un adaptador deshabilitado no se puede habilitar con la VM encendida.
+2. Conecta ese Ethernet a un puerto **LAN** del router/AP dedicado; desactiva el DHCP de ese router y su otra conexión a Internet. El router que proporciona Internet al PC sigue en la interfaz de salida.
+3. Arranca Kali y ejecuta `sudo .venv/bin/python script.py --portal-check`. Si hay reglas de Docker u otro firewall, esta versión rechaza el inicio; usa una instalación dedicada sin ese conflicto. No basta con añadir la tarjeta.
+4. En el menú, elige **3 → 2** y la interfaz Ethernet de clientes, que debe estar libre. Los dispositivos deben conectarse al router/AP dedicado para pasar por el portal.
+
 En Kali/Linux, ejecuta `python3 script.py --setup` para instalar también NetworkManager, `dnsmasq-base` y nftables. Abre `.venv/bin/python script.py` y elige **3**, o entra directamente con `.venv/bin/python script.py --portal`.
 
 El asistente ofrece:

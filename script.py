@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""POLTERHEIST: inventario LAN (Linux) y reconocimiento Wi-Fi (Linux/Windows)."""
+"""POLTERHEIST: LAN inventory (Linux) and Wi-Fi reconnaissance (Linux/Windows)."""
 
 import argparse
 import csv
@@ -28,20 +28,20 @@ from contextlib import contextmanager
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
-VERSION = "2.5.1"
+VERSION = "2.6.0"
 BASE = Path(__file__).resolve().parent
 PROFILE_PATH = BASE / "config" / "profile.json"
 REPORTS = BASE / "reports"
 UPSTREAM_COMMIT = "3cb3ef77d6b71e8441a51668c7e2b919608180f9"
 VENDOR = BASE / "vendor" / "broadcom-wps"
 PROFILE_FIELDS = {
-    "name_alias": "Nombre / alias",
-    "specialization": "Especialización",
-    "biography": "Biografía",
+    "name_alias": "Name / alias",
+    "specialization": "Specialization",
+    "biography": "Biography",
     "github": "GitHub",
     "linkedin": "LinkedIn",
     "website": "Web",
-    "contact": "Contacto",
+    "contact": "Contact",
 }
 
 GREEN = "\033[92m"
@@ -169,7 +169,7 @@ def run_progress(cmd, label, logfile, timeout=None, stop_after_timeout=False):
                     phase = line.split("Timing:")[0].strip() if "Timing:" in line else "Nmap"
                     activity.progress = (
                         f"{safe_text(phase)} [{'#' * filled}{'-' * (16 - filled)}] "
-                        f"{percent:g}% ETA: {remaining.group(1) if remaining else 'desconocida'}"
+                        f"{percent:g}% ETA: {remaining.group(1) if remaining else 'unknown'}"
                     )
                 elif "Initiating " in line:
                     activity.progress = safe_text(line.strip())
@@ -211,17 +211,17 @@ def run_quiet(cmd, timeout=120):
 def require_linux(root=False):
     if not sys.platform.startswith("linux"):
         raise RuntimeError(
-            "Esta función requiere Kali/Linux. En Windows están disponibles el menú, el perfil, WIRELESS RECON y la vista previa del portal."
+            "This feature requires Kali/Linux. Windows supports the menu, profile, WIRELESS RECON, and portal preview."
         )
     if root and os.geteuid() != 0:
-        raise RuntimeError("Necesitas root: sudo .venv/bin/python script.py")
+        raise RuntimeError("Root privileges required: sudo .venv/bin/python script.py")
 
 
 def require_tools(*names):
     missing = [name for name in names if not shutil.which(name)]
     if missing:
         raise RuntimeError(
-            "Falta: " + ", ".join(missing) + ". Ejecuta python3 script.py --setup en Kali/Linux."
+            "Missing: " + ", ".join(missing) + ". Run python3 script.py --setup on Kali/Linux."
         )
 
 
@@ -244,10 +244,10 @@ def operating_system():
 
 def setup_environment():
     system = operating_system()
-    print("  Preparando POLTERHEIST para " + system["name"])
+    print("  Setting up POLTERHEIST for " + system["name"])
     if system["family"] == "linux":
         if not shutil.which("apt-get"):
-            raise RuntimeError("La instalación automática Linux requiere APT (Kali/Debian/Ubuntu).")
+            raise RuntimeError("Automatic Linux setup requires APT (Kali/Debian/Ubuntu).")
         prefix = [] if os.geteuid() == 0 else ["sudo", "--"]
         if prefix:
             require_tools("sudo")
@@ -268,7 +268,7 @@ def setup_environment():
         subprocess.run(prefix + ["apt-get", "update"], check=True)
         subprocess.run(prefix + ["apt-get", "install", "-y", *packages], check=True)
     elif system["family"] != "windows":
-        raise RuntimeError("Sistema compatible: Kali/Linux o Windows.")
+        raise RuntimeError("Supported systems: Kali/Linux or Windows.")
     environment = BASE / ".venv"
     python = environment / ("Scripts/python.exe" if system["family"] == "windows" else "bin/python")
     # A checkout copied between operating systems may contain an incompatible venv.
@@ -283,7 +283,7 @@ def setup_environment():
     subprocess.run(
         [str(python), "-m", "pip", "install", "-r", str(BASE / "requirements.txt")], check=True
     )
-    print("  Preparado. Ejecuta: " + str(python) + " script.py --wireless")
+    print("  Ready. Run: " + str(python) + " script.py --wireless")
     return 0
 
 
@@ -294,7 +294,7 @@ def linux_elevated_wireless(ssid=None, bssid=None):
         args.extend(["--ssid", ssid])
     if bssid is not None:
         args.extend(["--bssid", bssid])
-    print("  Linux solicitará permisos sudo para preparar y restaurar el adaptador.")
+    print("  Linux will request sudo privileges to prepare and restore the adapter.")
     return subprocess.run(args, check=False).returncode
 
 
@@ -322,7 +322,7 @@ def netinfo():
     )
     route = next((r for r in routes if r.get("dev")), None)
     if not route:
-        raise RuntimeError("No hay ruta predeterminada IPv4")
+        raise RuntimeError("No default IPv4 route")
     dev = route["dev"]
     gateway = route.get("gateway")
     addr = json.loads(
@@ -338,7 +338,7 @@ def netinfo():
         None,
     )
     if info is None:
-        raise RuntimeError("La interfaz predeterminada no tiene una dirección IPv4 global")
+        raise RuntimeError("The default interface has no global IPv4 address")
     my_ip = info["local"]
     network = ipaddress.ip_network(f"{my_ip}/{info['prefixlen']}", strict=False)
     return dev, my_ip, gateway, network
@@ -364,7 +364,7 @@ def discover(dev, my_ip, gateway, network, folder):
             {
                 "ip": ip,
                 "mac": "-",
-                "vendor": "Desconocido",
+                "vendor": "Unknown",
                 "sources": [],
                 "manufacturer_evidence": [],
                 "local": False,
@@ -398,7 +398,7 @@ def discover(dev, my_ip, gateway, network, folder):
             if match:
                 add(*match.groups(), source="ARP")
     else:
-        print(tint("  [!] arp-scan falló; se continúa con Nmap.", AMBER))
+        print(tint("  [!] arp-scan failed; continuing with Nmap.", AMBER))
 
     # XML to file avoids mixing messages with parser output.
     xml = folder / "discovery_nmap.xml"
@@ -410,7 +410,7 @@ def discover(dev, my_ip, gateway, network, folder):
             timeout=180,
         )
         if res.returncode:
-            print(tint("  [!] Nmap discovery falló; revisa discovery_nmap.log.", AMBER))
+            print(tint("  [!] Nmap discovery failed; check discovery_nmap.log.", AMBER))
     except (OSError, subprocess.TimeoutExpired) as error:
         print(tint(f"  [!] Nmap discovery: {error}", AMBER))
     if xml.exists():
@@ -429,9 +429,9 @@ def discover(dev, my_ip, gateway, network, folder):
                 if ipv4:
                     add(ipv4, mac, vendor, "Nmap")
         except ET.ParseError:
-            print(tint("  [!] XML de descubrimiento ilegible.", AMBER))
+            print(tint("  [!] Unable to read the discovery XML.", AMBER))
     else:
-        print(tint("  [!] Sin XML de descubrimiento Nmap.", AMBER))
+        print(tint("  [!] No Nmap discovery XML available.", AMBER))
 
     local_mac = Path("/sys/class/net") / dev / "address"
     add(my_ip, mac=local_mac.read_text().strip() if local_mac.exists() else "", source="LOCAL")
@@ -465,8 +465,8 @@ def table(headers, rows, widths):
 def show_hosts(hosts):
     print(tint("\n[+] POLTERHEIST :: NETWORK DISCOVERY"))
     rows = [[h["id"], h["ip"], h["mac"], h["vendor"], ", ".join(h["sources"])] for h in hosts]
-    table(["ID", "IP", "MAC", "FABRICANTE / INFO", "FUENTE"], rows, [3, 15, 17, 38, 16])
-    print(f"  Total: {len(hosts)} IPs; LOCAL identifica esta máquina.")
+    table(["ID", "IP", "MAC", "VENDOR / INFO", "SOURCE"], rows, [3, 15, 17, 38, 16])
+    print(f"  Total: {len(hosts)} IPs; LOCAL identifies this computer.")
 
 
 def identify(host, folder):
@@ -477,10 +477,10 @@ def identify(host, folder):
         "id": host["id"],
         "ip": ip,
         "vendor": vendor,
-        "vendor_confidence": "Media" if good_vendor(vendor) else "Baja",
-        "type": "Desconocido",
-        "os": "Desconocido",
-        "type_confidence": "Baja",
+        "vendor_confidence": "Medium" if good_vendor(vendor) else "Low",
+        "type": "Unknown",
+        "os": "Unknown",
+        "type_confidence": "Low",
         "evidence": list(host.get("manufacturer_evidence", [])),
         "mobile": False,
         "local": loc,
@@ -488,27 +488,27 @@ def identify(host, folder):
         "sources": host["sources"],
     }
     if host["mac"] != "-" and int(host["mac"].split(":")[0], 16) & 2:
-        data["vendor_confidence"] = "Baja"
-        data["evidence"].append("MAC administrada localmente: OUI no fiable")
+        data["vendor_confidence"] = "Low"
+        data["evidence"].append("Locally administered MAC: unreliable OUI")
     if loc:
         distro = Path("/etc/os-release")
         kali = distro.exists() and re.search(
             r"^ID=[\"\x27]?kali[\"\x27]?$", distro.read_text(), re.M
         )
         data.update(
-            type="Kali (LOCAL)" if kali else "Linux (LOCAL)", os="Linux", type_confidence="Alta"
+            type="Kali (LOCAL)" if kali else "Linux (LOCAL)", os="Linux", type_confidence="High"
         )
-        data["evidence"].append("Interfaz local")
+        data["evidence"].append("Local interface")
         return data
     if host["gateway"]:
-        data.update(type="Router / gateway", type_confidence="Alta")
-        data["evidence"].append("Puerta de enlace")
+        data.update(type="Router / gateway", type_confidence="High")
+        data["evidence"].append("Default gateway")
     elif "apple" in vendor.lower():
         data["type"] = "Apple device"
-        data["evidence"].append("OUI Apple; sin identificar tipo")
+        data["evidence"].append("Apple OUI; device type unidentified")
     elif "sichuan ai-link" in vendor.lower():
-        data["type"] = "IoT posible"
-        data["evidence"].append("Marca de modulo WiFi; no concluyente")
+        data["type"] = "Possible IoT device"
+        data["evidence"].append("Wi-Fi module vendor; inconclusive")
 
     path = folder / f"identify_{ip}.xml"
     cmd = [
@@ -535,12 +535,12 @@ def identify(host, folder):
     ]
     try:
         res = run_progress(
-            cmd, f"Identificando ID {host['id']}: {ip}", folder / f"identify_{ip}.log", timeout=90
+            cmd, f"Identifying ID {host['id']}: {ip}", folder / f"identify_{ip}.log", timeout=90
         )
         if res.returncode:
-            data["evidence"].append(f"Nmap terminó con código {res.returncode}; ver log")
+            data["evidence"].append(f"Nmap exited with code {res.returncode}; see log")
     except (OSError, subprocess.TimeoutExpired) as error:
-        data["evidence"].append(f"Identificación incompleta: {error}")
+        data["evidence"].append(f"Incomplete identification: {error}")
     if not path.exists():
         return data
     try:
@@ -562,12 +562,12 @@ def identify(host, folder):
             ("linux", "Linux"),
         ]:
             if token in low:
-                data["os"] = label + " (estimado)"
+                data["os"] = label + " (estimated)"
                 break
         else:
             if name:
                 data["os"] = cut(name, 30)
-        data["evidence"].append(f"Nmap osmatch {accuracy}% similitud")
+        data["evidence"].append(f"Nmap osmatch {accuracy}% similarity")
     ports = {}
     products = []
     for p in root.findall("./host/ports/port"):
@@ -581,18 +581,18 @@ def identify(host, folder):
     data["evidence"].append({"open_ports": sorted(ports), "products": products})
     if not host["gateway"]:
         if 9100 in ports:
-            data.update(type="Impresora probable", type_confidence="Media")
+            data.update(type="Likely printer", type_confidence="Medium")
         elif any(x in " ".join(products) for x in ["routeros", "openwrt", "fritz!os"]):
-            data.update(type="Router probable", type_confidence="Media")
-        elif data["os"] in ("iOS (estimado)", "Android (estimado)") and accuracy >= 95:
-            data.update(type="Movil/tablet probable", type_confidence="Media", mobile=True)
+            data.update(type="Likely router", type_confidence="Medium")
+        elif data["os"] in ("iOS (estimated)", "Android (estimated)") and accuracy >= 95:
+            data.update(type="Likely phone/tablet", type_confidence="Medium", mobile=True)
         elif 3389 in ports or 445 in ports:
-            data.update(type="PC / servidor posible", type_confidence="Media")
+            data.update(type="Possible PC / server", type_confidence="Medium")
     return data
 
 
 def show_ids(ident):
-    print(tint("\n[+] POLTERHEIST :: IDENTIFICACION PRELIMINAR"))
+    print(tint("\n[+] POLTERHEIST :: PRELIMINARY IDENTIFICATION"))
     rows = [
         [
             d["id"],
@@ -606,25 +606,25 @@ def show_ids(ident):
         for d in ident
     ]
     table(
-        ["ID", "IP", "FABRICANTE", "TIPO ESTIMADO", "SO ESTIMADO", "CONF FAB", "CONF TIPO"],
+        ["ID", "IP", "VENDOR", "ESTIMATED TYPE", "ESTIMATED OS", "VENDOR CONF", "TYPE CONF"],
         rows,
         [3, 15, 27, 23, 19, 8, 9],
     )
-    print("  Las clasificaciones son estimaciones; Apple no implica iPhone.")
+    print("  Classifications are estimates; Apple does not imply iPhone.")
 
 
 def choose(hosts, ident):
     by_id = {host["id"]: host for host in hosts}
     defaults = [host for host in hosts if not host["local"]]
     valid = [d for d in ident if not d["mobile"] and not by_id[d["id"]]["local"]]
-    print(tint("\n[+] POLTERHEIST :: OBJETIVOS"))
-    print(f"  [0] All IPs ({len(defaults)}; excluye LOCAL)")
-    print(f"  [1] All non-mobile IPs ({len(valid)}; excluye Kali)")
+    print(tint("\n[+] POLTERHEIST :: TARGETS"))
+    print(f"  [0] All IPs ({len(defaults)}; excludes LOCAL)")
+    print(f"  [1] All non-mobile IPs ({len(valid)}; excludes Kali)")
     for d in valid:
         print(f"      [{d['id']}] {d['ip']} - {d['type']}")
-    print("  [2] Custom - IDs separados por comas, ej. 1,3,5")
+    print("  [2] Custom - comma-separated IDs, e.g. 1,3,5")
     while True:
-        mode = input("  Selecciona [0/1/2] (q salir): ").strip().lower()
+        mode = input("  Select [0/1/2] (q to quit): ").strip().lower()
         if mode == "q":
             return []
         if mode == "0":
@@ -635,19 +635,19 @@ def choose(hosts, ident):
             raw = input("  IDs: ").strip()
             parts = [p.strip() for p in raw.split(",")]
             if not parts or any(not p.isdigit() for p in parts):
-                print("  Formato no valido")
+                print("  Invalid format")
                 continue
             ids = list(dict.fromkeys(int(p) for p in parts))
             if any(i not in by_id for i in ids):
-                print("  ID fuera de rango")
+                print("  ID out of range")
                 continue
             selected = [by_id[i] for i in ids]
         else:
             continue
         if selected:
-            print("  Seleccionados: " + ", ".join(h["ip"] for h in selected))
+            print("  Selected: " + ", ".join(h["ip"] for h in selected))
             return selected
-        print("  Sin objetivos. Prueba otra opcion.")
+        print("  No targets. Try another option.")
 
 
 def scan_one(host, mode, folder, index, total):
@@ -670,7 +670,7 @@ def scan_one(host, mode, folder, index, total):
     ]
     cmd += ["-T2", "--max-rate", "50"] if mode == "1" else ["-T3"]
     cmd.append(ip)
-    print(tint(f"\n[{index}/{total}] Analizando {ip}"))
+    print(tint(f"\n[{index}/{total}] Scanning {ip}"))
     status = {
         "id": host["id"],
         "ip": ip,
@@ -686,7 +686,7 @@ def scan_one(host, mode, folder, index, total):
             returncode=res.returncode, status="completed" if res.returncode == 0 else "error"
         )
         if res.returncode:
-            print(tint(f"  [!] Nmap: código {res.returncode}; revisa scan_{ip}.log", AMBER))
+            print(tint(f"  [!] Nmap: exit code {res.returncode}; check scan_{ip}.log", AMBER))
     except KeyboardInterrupt:
         status["status"] = "cancelled"
         raise
@@ -767,20 +767,23 @@ def lan_recon():
     require_tools("nmap", "ip")
     dev, my_ip, gateway, network = netinfo()
     if network.num_addresses > 4096:
-        raise RuntimeError("Subred demasiado grande (>4096 direcciones)")
+        raise RuntimeError("Subnet too large (>4096 addresses)")
     print(f"  Interface={dev} | Local={my_ip} | Gateway={gateway} | Network={network}")
-    print("\n  [1] GHOST MODE: completo, menor velocidad (detectable)")
-    print("  [2] HUNTER MODE: completo, velocidad normal")
-    mode = input("  Modo [1/2]: ").strip()
+    print("\n  [1] GHOST MODE: full scan, slower speed (detectable)")
+    print("  [2] HUNTER MODE: full scan, normal speed")
+    mode = input("  Mode [1/2]: ").strip()
     if mode not in ("1", "2"):
         return
     print(
         tint(
-            "  Ambos modos generan tráfico y logs; algunos scripts vuln pueden ser intrusivos.",
+            "  Both modes generate traffic and logs; some vuln scripts can be intrusive.",
             AMBER,
         )
     )
-    if input("  ¿Red propia o autorizada? [s/N]: ").strip().lower() not in ("s", "si", "sí"):
+    if input("  Do you own this network or have authorization? [y/N]: ").strip().lower() not in (
+        "y",
+        "yes",
+    ):
         return
     folder = report_folder("lan")
     rows = []
@@ -810,7 +813,7 @@ def lan_recon():
             folder / "selection.json",
             {"mode": mode, "ids": [h["id"] for h in selected], "ips": [h["ip"] for h in selected]},
         )
-        if not selected or input("  Pulsa INTRO para escanear (q volver): ").strip().lower() == "q":
+        if not selected or input("  Press ENTER to scan (q to return): ").strip().lower() == "q":
             report["status"] = "discovery_only"
             return
         for i, h in enumerate(selected, 1):
@@ -822,7 +825,7 @@ def lan_recon():
         )
     except (KeyboardInterrupt, EOFError):
         report["status"] = "cancelled"
-        print("\n  Interrumpido; conservando las evidencias.")
+        print("\n  Interrupted; preserving evidence.")
     except Exception as error:
         report.update(status="error", error=str(error))
         raise
@@ -834,17 +837,17 @@ def lan_recon():
             writer = csv.DictWriter(f, fieldnames=cols)
             writer.writeheader()
             writer.writerows(rows)
-        print(f"  Informes: {folder}")
-    print(tint("\n[+] POLTERHEIST :: RESULTADOS"))
+        print(f"  Reports: {folder}")
+    print(tint("\n[+] POLTERHEIST :: RESULTS"))
     table(
-        ["ID", "IP", "FABRICANTE", "PUERTO", "SERVICIO", "VERSION", "CVEs"],
+        ["ID", "IP", "VENDOR", "PORT", "SERVICE", "VERSION", "CVEs"],
         [
             [r[k] for k in ("id", "ip", "vendor", "port", "service", "version", "cves")]
             for r in rows
         ],
         [3, 15, 24, 10, 14, 30, 28],
     )
-    print("  Los CVE son referencias potenciales, no vulnerabilidades confirmadas.")
+    print("  CVEs are potential references, not confirmed vulnerabilities.")
 
 
 # Wireless inventory. These parsers operate on saved scanner output as well as live scans.
@@ -929,27 +932,27 @@ class WinConnectionParameters(ctypes.Structure):
 def windows_wlan_error(code, operation):
     if code == 5:
         detail = (
-            "Acceso denegado: activa el acceso a Ubicación en Configuración > "
-            "Privacidad y seguridad > Ubicación para esta aplicación/terminal."
+            "Access denied: enable Location access in Settings > "
+            "Privacy & security > Location for this application/terminal."
         )
     elif code == 1062:
-        detail = "Inicia el servicio Configuración automática de WLAN (WlanSvc)."
+        detail = "Start the WLAN AutoConfig service (WlanSvc)."
     elif code == 5023:
         detail = (
-            "La interfaz no está disponible en este modo; revisa radio, controlador y modo monitor."
+            "The interface is unavailable in this mode; check the radio, driver, and monitor mode."
         )
     else:
-        detail = "Revisa el adaptador, la radio Wi-Fi y su controlador."
-    return RuntimeError(f"{operation}: error Windows {code}. {detail}")
+        detail = "Check the adapter, Wi-Fi radio, and its driver."
+    return RuntimeError(f"{operation}: Windows error {code}. {detail}")
 
 
 def parse_windows_interfaces(data):
     if len(data) < 8:
-        raise ValueError("Lista de interfaces WLAN truncada")
+        raise ValueError("Truncated WLAN interface list")
     count = int.from_bytes(data[:4], "little")
     size = ctypes.sizeof(WinInterface)
     if count > 1024 or 8 + count * size > len(data):
-        raise ValueError("Tamaño de interfaces WLAN no válido")
+        raise ValueError("Invalid WLAN interface list size")
     result = []
     for offset in range(8, 8 + count * size, size):
         item = WinInterface.from_buffer_copy(data, offset)
@@ -984,12 +987,12 @@ def information_element_security(ap, raw, capability):
     warnings = []
     while offset < len(raw):
         if offset + 2 > len(raw):
-            warnings.append("Cabecera IE truncada")
+            warnings.append("Truncated IE header")
             break
         element, size = raw[offset : offset + 2]
         offset += 2
         if offset + size > len(raw):
-            warnings.append("Contenido IE truncado")
+            warnings.append("Truncated IE contents")
             break
         body = raw[offset : offset + size]
         offset += size
@@ -1009,7 +1012,7 @@ def information_element_security(ap, raw, capability):
                 length = int.from_bytes(body[pos + 2 : pos + 4], "big")
                 pos += 4
                 if pos + length > len(body):
-                    warnings.append("Atributo WPS truncado")
+                    warnings.append("Truncated WPS attribute")
                     break
                 value = body[pos : pos + length]
                 pos += length
@@ -1035,22 +1038,22 @@ def information_element_security(ap, raw, capability):
 
 def parse_windows_bss(data):
     if len(data) < 8:
-        raise ValueError("Lista BSS truncada")
+        raise ValueError("Truncated BSS list")
     total = int.from_bytes(data[:4], "little")
     count = int.from_bytes(data[4:8], "little")
     size = ctypes.sizeof(WinBssEntry)
     entries_end = 8 + count * size
     if total != len(data) or entries_end > total:
-        raise ValueError("Tamaño BSS no válido")
+        raise ValueError("Invalid BSS size")
     aps = []
     for offset in range(8, entries_end, size):
         item = WinBssEntry.from_buffer_copy(data, offset)
         if item.ssid.length > 32:
-            raise ValueError("SSID de más de 32 bytes en BSS")
+            raise ValueError("SSID longer than 32 bytes in BSS")
         start = offset + item.ie_offset
         end = start + item.ie_size
         if item.ie_size and (start < entries_end or end > total):
-            raise ValueError("IE fuera del buffer BSS")
+            raise ValueError("IE outside the BSS buffer")
         ssid = bytes(item.ssid.data[: item.ssid.length])
         ap = new_ap(
             bytes(item.bssid).hex(":"),
@@ -1078,7 +1081,7 @@ class WindowsWlan:
 
     def __enter__(self):
         if sys.platform != "win32":
-            raise RuntimeError("Native Wi-Fi requiere Windows")
+            raise RuntimeError("Native Wi-Fi requires Windows")
         self.dll = ctypes.WinDLL("wlanapi.dll", winmode=0x800)
         ptr = ctypes.c_void_p
         uint = ctypes.c_uint32
@@ -1162,19 +1165,19 @@ class WindowsWlan:
         try:
             required = 556 if ssid_only else 520
             if not ptr.value or size.value < required:
-                raise ValueError("Datos de conexión WLAN truncados")
+                raise ValueError("Truncated WLAN connection data")
             header = ctypes.string_at(ptr, required)
             if int.from_bytes(header[:4], "little") != 1:
                 return None
             if ssid_only:
                 length = int.from_bytes(header[520:524], "little")
                 if not 1 <= length <= 32:
-                    raise ValueError("SSID de conexión no válido")
+                    raise ValueError("Invalid connection SSID")
                 return header[524 : 524 + length].decode("utf-8")
             profile = header[8:520].decode("utf-16-le").split("\0")[0]
             if not profile:
                 raise RuntimeError(
-                    "La conexión actual no tiene un perfil guardado que se pueda restaurar."
+                    "The current connection has no saved profile that can be restored."
                 )
             return profile
         finally:
@@ -1187,14 +1190,14 @@ class WindowsWlan:
             self.dll.WlanConnect(
                 self.handle, ctypes.byref(native_guid), ctypes.byref(parameters), None
             ),
-            "WlanConnect/restaurar conexión",
+            "WlanConnect/restore connection",
         )
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
             if self.connected_profile(guid) == profile:
                 return
             time.sleep(0.25)
-        raise RuntimeError("Windows no ha confirmado la reconexión al perfil anterior.")
+        raise RuntimeError("Windows did not confirm reconnection to the previous profile.")
 
     def interfaces(self):
         ptr = ctypes.c_void_p()
@@ -1203,10 +1206,10 @@ class WindowsWlan:
         )
         try:
             if not ptr.value:
-                raise RuntimeError("WlanEnumInterfaces devolvió un buffer vacío")
+                raise RuntimeError("WlanEnumInterfaces returned an empty buffer")
             count = ctypes.c_uint32.from_address(ptr.value).value
             if count > 1024:
-                raise ValueError("Demasiadas interfaces WLAN")
+                raise ValueError("Too many WLAN interfaces")
             return parse_windows_interfaces(
                 ctypes.string_at(ptr, 8 + count * ctypes.sizeof(WinInterface))
             )
@@ -1236,9 +1239,9 @@ class WindowsWlan:
                 self.dll.WlanScan(self.handle, ctypes.byref(guid), None, None, None), "WlanScan"
             )
             if not done.wait(timeout):
-                return "Windows no confirmó la actualización en 15 s; los resultados pueden proceder de caché."
+                return "Windows did not confirm a refresh within 15 seconds; results may be cached."
             if outcome[-1] == 8:
-                return "Windows notificó un fallo de actualización; se conserva la caché BSS disponible."
+                return "Windows reported a refresh failure; retaining the available BSS cache."
             return None
         finally:
             # Unregister outside the callback; keep it alive until callbacks have finished.
@@ -1255,10 +1258,10 @@ class WindowsWlan:
         )
         try:
             if not ptr.value:
-                raise RuntimeError("WlanGetNetworkBssList devolvió un buffer vacío")
+                raise RuntimeError("WlanGetNetworkBssList returned an empty buffer")
             size = ctypes.c_uint32.from_address(ptr.value).value
             if not 8 <= size <= 64 * 1024 * 1024:
-                raise ValueError("Buffer BSS de tamaño no válido")
+                raise ValueError("Invalid BSS buffer size")
             return ctypes.string_at(ptr, size)
         finally:
             self.dll.WlanFreeMemory(ptr)
@@ -1274,11 +1277,11 @@ def wlan_helper(guid, setting, value=None):
     path = wlan_helper_path()
     if not path:
         raise RuntimeError(
-            "Instala Npcap con Support raw 802.11 traffic (and monitor mode); falta WlanHelper.exe."
+            "Install Npcap with Support raw 802.11 traffic (and monitor mode); WlanHelper.exe is missing."
         )
     guid = str(uuid.UUID(guid.strip("{}")))
     if setting not in {"mode", "modes", "channel", "freq"}:
-        raise ValueError("Operación WlanHelper no permitida")
+        raise ValueError("Unsupported WlanHelper operation")
     command = [path, guid, setting]
     if value is not None:
         if setting == "mode" and value in {"managed", "monitor"}:
@@ -1286,15 +1289,15 @@ def wlan_helper(guid, setting, value=None):
         elif setting in {"channel", "freq"}:
             number = int(value)
             if not (1 <= number <= 14 if setting == "channel" else 2300 <= number <= 7125):
-                raise ValueError("Canal/frecuencia WlanHelper fuera de rango")
+                raise ValueError("WlanHelper channel/frequency out of range")
             command.append(str(number))
         else:
-            raise ValueError("Operación WlanHelper no permitida")
+            raise ValueError("Unsupported WlanHelper operation")
     result = run_quiet(command, timeout=10)
     if result is None or result.returncode:
         detail = (result.stdout or "").strip() if result is not None else "timeout"
         raise RuntimeError(
-            f"WlanHelper {setting}: {safe_text(detail)}. Revisa permisos y controlador."
+            f"WlanHelper {setting}: {safe_text(detail)}. Check permissions and the driver."
         )
     return result.stdout.strip()
 
@@ -1311,7 +1314,7 @@ def detect_windows_interfaces():
     for iface in interfaces:
         if not wlan_helper_path():
             iface["monitor_note"] = (
-                "Npcap/WlanHelper no instalado; disponible descubrimiento nativo."
+                "Npcap/WlanHelper is not installed; native discovery is available."
             )
             continue
         try:
@@ -1332,7 +1335,7 @@ def detect_windows_interfaces():
 def discover_windows_wifi(iface, folder, limitations):
     if iface["mode"] == "monitor":
         raise RuntimeError(
-            "Para descubrir redes con Windows usa una interfaz managed; el monitor se selecciona después para la prueba WPS."
+            "Use a managed interface for Windows discovery; monitor mode is selected later for the WPS test."
         )
     with WindowsWlan() as wlan, Spinner("Wi-Fi / Windows Native Wi-Fi"):
         warning = wlan.scan(iface["guid"])
@@ -1343,7 +1346,7 @@ def discover_windows_wifi(iface, folder, limitations):
     aps = parse_windows_bss(data)
     dump_json(folder / "windows_discovery.json", aps)
     limitations.append(
-        "Datos BSS/IE del controlador Windows; no son una captura PCAP. La API puede usar caché."
+        "BSS/IE data from the Windows driver, not a PCAP capture. The API may use cached data."
     )
     return aps
 
@@ -1417,9 +1420,7 @@ def detect_wireless_interfaces():
     require_tools("iw")
     result = run_quiet(["iw", "dev"], timeout=10)
     if result is None or result.returncode:
-        raise RuntimeError(
-            "iw no puede consultar las interfaces; revisa permisos, controlador y rfkill."
-        )
+        raise RuntimeError("iw cannot query interfaces; check permissions, the driver, and rfkill.")
     interfaces = parse_iw_interfaces(result.stdout)
     phys = {}
     for iface in interfaces:
@@ -1450,19 +1451,17 @@ def decode_iw_ssid(value):
 
 def require_isolated_monitor(iface, interfaces):
     if iface["mode"] != "monitor":
-        raise RuntimeError(
-            "Selecciona una interfaz ya preparada en modo monitor; consulta el README."
-        )
+        raise RuntimeError("Select an interface already in monitor mode; see the README.")
     if not iface.get("phy"):
-        raise RuntimeError("No se conoce el PHY; no se puede comprobar si comparte la radio.")
+        raise RuntimeError("Unknown PHY; unable to check whether the radio is shared.")
     siblings = [
         i["name"] for i in interfaces if i["phy"] == iface["phy"] and i["name"] != iface["name"]
     ]
     if siblings:
         raise RuntimeError(
-            "La radio está compartida con "
+            "The radio is shared with "
             + ", ".join(siblings)
-            + ". Usa un adaptador dedicado para no alterar otras conexiones."
+            + ". Use a dedicated adapter to avoid disrupting other connections."
         )
 
 
@@ -1482,7 +1481,7 @@ def linux_radio_candidate(interfaces, preferred, ap=None):
         candidates.append(iface)
     if not candidates:
         raise RuntimeError(
-            "No hay una radio Linux compatible con monitor y el canal permitido del objetivo, sin interfaces compartidas. Revisa iw phy, regulación y controlador."
+            "No dedicated Linux radio supports monitor mode on the permitted target channel. Check iw phy, regulatory restrictions, and the driver."
         )
     return min(
         candidates, key=lambda i: (i.get("connected", False), i["name"] != preferred["name"])
@@ -1505,7 +1504,7 @@ def linux_nm_state(name):
         return None, None
     fields = result.stdout.splitlines()
     if not fields or fields[0] not in {"yes", "no"}:
-        raise RuntimeError("NetworkManager no devolvió un estado interpretable.")
+        raise RuntimeError("NetworkManager returned an unrecognized state.")
     connection = fields[1].strip() if len(fields) > 1 else ""
     connection = str(uuid.UUID(connection)) if connection not in {"", "--"} else None
     return fields[0] == "yes", connection
@@ -1513,9 +1512,9 @@ def linux_nm_state(name):
 
 def validate_linux_target(ap, iface):
     if not MAC.fullmatch(ap["bssid"]):
-        raise ValueError("BSSID no válido")
+        raise ValueError("Invalid BSSID")
     if not ap["ssid"] or len(ap["ssid"].encode("utf-8")) > 32:
-        raise ValueError("SSID oculto/no válido; se necesita el SSID exacto")
+        raise ValueError("Hidden/invalid SSID; the exact SSID is required")
     frequency = ap.get("frequency_mhz")
     if (
         frequency is None
@@ -1524,12 +1523,12 @@ def validate_linux_target(ap, iface):
         or frequency_channel(frequency) != ap["channel"]
     ):
         raise RuntimeError(
-            "El detector requiere canal/frecuencia coherentes en 2.4/5 GHz; 6 GHz no está soportado."
+            "The detector requires a matching channel/frequency in 2.4/5 GHz; 6 GHz is unsupported."
         )
     supported = next((f for f in iface["frequencies"] if f["frequency_mhz"] == frequency), None)
     if not supported or supported["disabled"] or supported["no_ir"] or supported["radar"]:
         raise RuntimeError(
-            "El canal no admite esta prueba activa según capacidades/regulación (disabled/no IR/DFS)."
+            "This channel does not permit active testing under the current capabilities/regulations (disabled/no IR/DFS)."
         )
 
 
@@ -1540,19 +1539,19 @@ def prepared_linux_monitor(ap, iface, interfaces, folder, state):
     validate_linux_target(ap, iface)
     require_isolated_monitor(dict(iface, mode="monitor"), interfaces)
     if iface["mode"] not in {"managed", "monitor"}:
-        raise RuntimeError("Modo original de interfaz no compatible con la restauración.")
+        raise RuntimeError("The original interface mode does not support automatic restoration.")
     name = iface["name"]
     links = json.loads(linux_command(["ip", "-json", "link", "show", "dev", name]))
     if len(links) != 1 or links[0].get("ifname") != name:
-        raise RuntimeError("No se puede guardar el estado original del adaptador.")
+        raise RuntimeError("Unable to save the original adapter state.")
     was_up = "UP" in links[0].get("flags", [])
     managed, connection = linux_nm_state(name)
     if iface.get("connected") and (not managed or not connection):
         raise RuntimeError(
-            "La conexión de esta radio no está controlada por NetworkManager; no se puede restaurar automáticamente."
+            "NetworkManager does not control this radio connection; automatic restoration is unavailable."
         )
     if iface["mode"] == "monitor" and not iface.get("frequency_mhz"):
-        raise RuntimeError("No se conoce la frecuencia del monitor original para restaurarla.")
+        raise RuntimeError("The original monitor frequency is unknown and cannot be restored.")
     state.update(
         interface=name,
         original_mode=iface["mode"],
@@ -1581,9 +1580,7 @@ def prepared_linux_monitor(ap, iface, interfaces, folder, state):
             or ready["mode"] != "monitor"
             or ready["frequency_mhz"] != ap["frequency_mhz"]
         ):
-            raise RuntimeError(
-                "El controlador no confirmó modo monitor y frecuencia tras la preparación."
-            )
+            raise RuntimeError("The driver did not confirm monitor mode and frequency after setup.")
         require_isolated_monitor(ready, live)
         state["prepared"] = True
         dump_json(folder / "radio_setup.json", state)
@@ -1595,7 +1592,7 @@ def prepared_linux_monitor(ap, iface, interfaces, folder, state):
             try:
                 action()
             except (Exception, KeyboardInterrupt) as error:
-                errors.append(str(error) or "Restauración interrumpida")
+                errors.append(str(error) or "Restoration interrupted")
 
         if radio_changed:
             restore(lambda: linux_command(["ip", "link", "set", "dev", name, "down"]))
@@ -1643,7 +1640,7 @@ def prepared_linux_monitor(ap, iface, interfaces, folder, state):
 def verify_linux_connection(name, connection):
     managed, active = linux_nm_state(name)
     if not managed or active != connection:
-        raise RuntimeError("NetworkManager no confirmó la conexión original restaurada.")
+        raise RuntimeError("NetworkManager did not confirm restoration of the original connection.")
 
 
 def verify_linux_radio(name, mode, was_up, frequency=None):
@@ -1656,7 +1653,7 @@ def verify_linux_radio(name, mode, was_up, frequency=None):
         or ("UP" in link[0].get("flags", [])) != was_up
         or (frequency is not None and current["frequency_mhz"] != frequency)
     ):
-        raise RuntimeError("Linux no confirmó el modo/estado original del adaptador.")
+        raise RuntimeError("Linux did not confirm restoration of the original adapter mode/state.")
 
 
 def frequency_channel(frequency):
@@ -1857,7 +1854,7 @@ def load_upstream():
         != manifest["files"]["broadcom_fingerprint.py"]
     ):
         raise RuntimeError(
-            "La copia del detector no coincide con el commit fijado. Restaura vendor/broadcom-wps."
+            "The detector copy does not match the pinned commit. Restore vendor/broadcom-wps."
         )
     name = "_polterheist_upstream"
     if name in sys.modules:
@@ -1870,22 +1867,22 @@ def load_upstream():
     except ImportError as error:
         sys.modules.pop(name, None)
         raise RuntimeError(
-            "Instala Scapy en este intérprete: python -m pip install -r requirements.txt"
+            "Install Scapy in this interpreter: python -m pip install -r requirements.txt"
         ) from error
     return module
 
 
 def rsn_akms(body):
     if len(body) < 8:
-        raise ValueError("RSN truncado")
+        raise ValueError("Truncated RSN")
     count = int.from_bytes(body[6:8], "little")
     offset = 8 + 4 * count
     if offset + 2 > len(body):
-        raise ValueError("RSN sin AKM")
+        raise ValueError("RSN without AKM")
     count = int.from_bytes(body[offset : offset + 2], "little")
     offset += 2
     if offset + 4 * count > len(body):
-        raise ValueError("AKM truncado")
+        raise ValueError("Truncated AKM")
     return [
         body[i + 3] if body[i : i + 3] == b"\x00\x0f\xac" else -1
         for i in range(offset, offset + 4 * count, 4)
@@ -1949,22 +1946,22 @@ def capture_beacons(interface, pcap_path, seconds=4):
     ]
     result = run_progress(
         cmd,
-        "Captura pasiva 802.11",
+        "Passive 802.11 capture",
         pcap_path.with_suffix(".log"),
         timeout=seconds,
         stop_after_timeout=True,
     )
     if result.returncode:
-        raise RuntimeError("tcpdump falló; revisa " + str(pcap_path.with_suffix(".log")))
+        raise RuntimeError("tcpdump failed; check " + str(pcap_path.with_suffix(".log")))
     if not pcap_path.exists() or pcap_path.stat().st_size < 24:
-        raise RuntimeError("tcpdump no produjo un PCAP válido; revisa el log y el controlador.")
+        raise RuntimeError("tcpdump did not produce a valid PCAP; check the log and driver.")
 
 
 def set_frequency(interface, frequency):
     result = run_quiet(["iw", "dev", interface, "set", "freq", str(frequency)], timeout=10)
     if result is None or result.returncode:
         detail = result.stderr.strip() if result else "timeout"
-        raise RuntimeError(f"No se pudo seleccionar {frequency} MHz: {detail}")
+        raise RuntimeError(f"Unable to select {frequency} MHz: {detail}")
 
 
 def monitor_discovery(iface, interfaces, folder, limitations):
@@ -1975,12 +1972,12 @@ def monitor_discovery(iface, interfaces, folder, limitations):
 
     original = iface["frequency_mhz"]
     if not original:
-        raise RuntimeError("Configura un canal inicial en la interfaz monitor; consulta el README.")
+        raise RuntimeError("Set an initial channel on the monitor interface; see the README.")
     frequencies = [f["frequency_mhz"] for f in iface["frequencies"] if not f["disabled"]]
     if not frequencies:
         frequencies = [original]
         limitations.append(
-            "No se pudo consultar la lista de canales: solo se capturó el canal actual."
+            "Unable to query the channel list: only the current channel was captured."
         )
     aps = []
     try:
@@ -2002,9 +1999,9 @@ def monitor_discovery(iface, interfaces, folder, limitations):
         try:
             set_frequency(iface["name"], original)
         except RuntimeError as error:
-            limitations.append("Restauración de frecuencia fallida: " + str(error))
+            limitations.append("Frequency restoration failed: " + str(error))
     limitations.append(
-        "Captura pasiva por canal; SSID ocultos o AP sin beacons durante la ventana pueden faltar."
+        "Passive capture per channel; hidden SSIDs or APs without beacons during the capture window may be missing."
     )
     return stable_ap_ids(aps)
 
@@ -2015,7 +2012,7 @@ def discover_wifi(iface, interfaces, folder, limitations):
     if iface["mode"] == "monitor":
         return monitor_discovery(iface, interfaces, folder, limitations)
     if iface["mode"] != "managed":
-        raise RuntimeError("Descubrimiento compatible con interfaces managed o monitor.")
+        raise RuntimeError("Discovery supports managed or monitor interfaces.")
     # Passive scan does not switch modes, disconnect or stop NetworkManager.
     result = None
     try:
@@ -2030,11 +2027,11 @@ def discover_wifi(iface, interfaces, folder, limitations):
     if result and result.returncode == 0:
         return parse_iw_scan(result.stdout)
     limitations.append(
-        "iw scan no disponible; nmcli puede devolver su caché y no expone WPS ni RSSI en dBm."
+        "iw scan is unavailable; nmcli may return cached data and does not expose WPS or RSSI in dBm."
     )
     if not shutil.which("nmcli"):
         raise RuntimeError(
-            "iw scan falló y falta nmcli. Revisa iw_scan.log, permisos y rfkill; instala network-manager."
+            "iw scan failed and nmcli is missing. Check iw_scan.log, permissions, and rfkill; install network-manager."
         )
     result = run_progress(
         [
@@ -2059,7 +2056,7 @@ def discover_wifi(iface, interfaces, folder, limitations):
         timeout=45,
     )
     if result.returncode:
-        raise RuntimeError("nmcli falló; revisa nmcli_scan.log y el estado de NetworkManager.")
+        raise RuntimeError("nmcli failed; check nmcli_scan.log and NetworkManager status.")
     return parse_nmcli(result.stdout)
 
 
@@ -2121,25 +2118,23 @@ def select_item(items, label, key="name", show_items=True):
             label_value = item.get("display_name", item[key]) if key == "name" else item[key]
             print(f"  [{number}] {safe_text(label_value)}")
     while True:
-        choice = input(f"  {label} (q volver): ").strip().lower()
+        choice = input(f"  {label} (q to return): ").strip().lower()
         if choice == "q":
             return None
         if choice in mapping:
             return mapping[choice]
-        print("  ID no válido.")
+        print("  Invalid ID.")
 
 
 def authorize_target(ap):
     print(
-        f"  Objetivo: SSID={safe_text(repr(ap['ssid']))} | BSSID={ap['bssid']} | canal={ap['channel']}"
+        f"  Target: SSID={safe_text(repr(ap['ssid']))} | BSSID={ap['bssid']} | channel={ap['channel']}"
     )
-    print("  El detector enviará una prueba WPS activa únicamente a este BSSID.")
-    print(
-        "  La limpieza por desautenticación está bloqueada; la sesión puede esperar al timeout del AP."
-    )
-    expected = "AUTORIZO " + ap["bssid"]
+    print("  The detector will send an active WPS test to this BSSID only.")
+    print("  Deauthentication cleanup is blocked; the session may wait for the AP timeout.")
+    expected = "AUTHORIZE " + ap["bssid"]
     return (
-        input(f"  Escribe {expected} si tienes autorización (INTRO cancela): ").strip().casefold()
+        input(f"  Type {expected} if you have authorization (ENTER cancels): ").strip().casefold()
         == expected.casefold()
     )
 
@@ -2171,12 +2166,12 @@ def assessment_from_upstream(document, ap):
 def fingerprint_summary(target, classification, original=None, reason=None):
     """Explain the actual detector result; missing evidence is never a positive/negative."""
     labels = {
-        "LIKELY_VULNERABLE": "PROBABLEMENTE VULNERABLE",
-        "PATCHED_HOSTAPD": "BROADCOM CON HOSTAPD SEGÚN EL DETECTOR",
-        "NO_BROADCOM_FINGERPRINT": "SIN HUELLA BROADCOM SEGÚN EL DETECTOR",
-        "INCONCLUSIVE": "NO CONCLUYENTE",
-        "NOT_TESTED": "NO EVALUADO",
-        "ERROR": "ERROR EN LA EVALUACIÓN",
+        "LIKELY_VULNERABLE": "LIKELY VULNERABLE",
+        "PATCHED_HOSTAPD": "BROADCOM WITH HOSTAPD ACCORDING TO THE DETECTOR",
+        "NO_BROADCOM_FINGERPRINT": "NO BROADCOM FINGERPRINT ACCORDING TO THE DETECTOR",
+        "INCONCLUSIVE": "INCONCLUSIVE",
+        "NOT_TESTED": "NOT TESTED",
+        "ERROR": "ASSESSMENT ERROR",
     }
     evidence_error = None
     if classification not in labels:
@@ -2190,24 +2185,22 @@ def fingerprint_summary(target, classification, original=None, reason=None):
         if original is not None:
             detected = assessment_from_upstream(original, target)
             if detected == "ERROR":
-                evidence_error = "El resultado del detector no corresponde al SSID/BSSID seleccionado o tiene un formato no válido."
+                evidence_error = "The detector result does not match the selected SSID/BSSID or has an invalid format."
             classification = detected
         elif classification != "INCONCLUSIVE":
             classification = "INCONCLUSIVE"
-            evidence_error = (
-                "No hay salida original del detector que respalde una conclusión de vulnerabilidad."
-            )
+            evidence_error = "No original detector output supports a vulnerability conclusion."
     document = original if isinstance(original, dict) and not evidence_error else {}
     transactions = document.get("transactions", [])
     if not isinstance(transactions, list):
         transactions = []
     explanations = {
-        "LIKELY_VULNERABLE": "El detector identifica una respuesta compatible con Broadcom WPS Monitor: vulnerabilidad probable, sin confirmar RCE.",
-        "PATCHED_HOSTAPD": "El fragmento recibió ACK como en hostapd y el anuncio contiene evidencia Broadcom. El detector identifica un equipo Broadcom que usa hostapd.",
-        "NO_BROADCOM_FINGERPRINT": "El fragmento recibió ACK como en hostapd, sin evidencia Broadcom en el anuncio. El detector no identifica la pila WPS de Broadcom.",
-        "INCONCLUSIVE": "No hay evidencia suficiente para decidir si es vulnerable. Una ausencia de respuesta o de anuncios WPS no se interpreta como un resultado negativo.",
-        "NOT_TESTED": "No se ha ejecutado el fingerprint activo para este objetivo.",
-        "ERROR": "La evaluación ha fallado; no permite determinar si el objetivo es vulnerable.",
+        "LIKELY_VULNERABLE": "The detector identifies a response consistent with Broadcom WPS Monitor: likely vulnerable, without confirming RCE.",
+        "PATCHED_HOSTAPD": "The fragment received an ACK as in hostapd and the advertisement contains Broadcom evidence. The detector identifies a Broadcom device using hostapd.",
+        "NO_BROADCOM_FINGERPRINT": "The fragment received an ACK as in hostapd, without Broadcom evidence in the advertisement. The detector does not identify the Broadcom WPS stack.",
+        "INCONCLUSIVE": "There is insufficient evidence to determine vulnerability. Missing responses or WPS advertisements are not interpreted as a negative result.",
+        "NOT_TESTED": "Active fingerprinting has not been run for this target.",
+        "ERROR": "Assessment failed; it cannot determine whether the target is vulnerable.",
     }
     return {
         "tool": "POLTERHEIST",
@@ -2230,7 +2223,7 @@ def fingerprint_summary(target, classification, original=None, reason=None):
         "transactions": [
             transaction for transaction in transactions if isinstance(transaction, dict)
         ],
-        "claim_boundary": "Fingerprint de implementación; no confirma explotación ni ejecución de código.",
+        "claim_boundary": "Implementation fingerprint; it does not confirm exploitation or code execution.",
     }
 
 
@@ -2238,25 +2231,25 @@ def show_fingerprint_result(summary, folder):
     target = summary["target"]
     print(tint("\nPOLTERHEIST :: WPS FINGERPRINT"))
     print(
-        f"  SSID: {safe_text(target['ssid'])} | BSSID: {safe_text(target['bssid'])} | canal: {target['channel']}"
+        f"  SSID: {safe_text(target['ssid'])} | BSSID: {safe_text(target['bssid'])} | channel: {target['channel']}"
     )
     print(tint("  " + summary["verdict"] + " [" + summary["assessment"] + "]", AMBER))
     print("  " + summary["explanation"])
     if summary["reason"]:
-        print("  Motivo: " + safe_text(summary["reason"]))
+        print("  Reason: " + safe_text(summary["reason"]))
     if summary["detector_assessment"]:
-        print("  Resultado original: " + safe_text(summary["detector_assessment"]))
+        print("  Original result: " + safe_text(summary["detector_assessment"]))
     if summary["implementation"]:
-        print("  Implementación estimada: " + safe_text(summary["implementation"]))
+        print("  Estimated implementation: " + safe_text(summary["implementation"]))
     if summary["target_health"]:
-        print("  Estado según detector: " + safe_text(summary["target_health"]))
+        print("  Detector health status: " + safe_text(summary["target_health"]))
     for transaction in summary["transactions"]:
-        print("  Respuesta observada: " + safe_text(transaction.get("response", "Unknown")))
+        print("  Observed response: " + safe_text(transaction.get("response", "Unknown")))
         if transaction.get("detail"):
             print("    " + safe_text(transaction["detail"]))
     if summary["warning"]:
-        print("  Observación del detector: " + safe_text(summary["warning"]))
-    print(f"  Resultado: {folder / 'fingerprint.json'}")
+        print("  Detector warning: " + safe_text(summary["warning"]))
+    print(f"  Result: {folder / 'fingerprint.json'}")
 
 
 def save_fingerprint_summary(folder, report):
@@ -2345,7 +2338,7 @@ def observe_selected(upstream, iface, ap, writer, seconds=8):
         sniffer.stop()
     if not observations:
         raise RuntimeError(
-            "El SSID/BSSID seleccionado no se ha observado en su canal; vuelve a descubrir."
+            "The selected SSID/BSSID was not observed on its channel; run discovery again."
         )
     return observations[-1]
 
@@ -2401,28 +2394,26 @@ def windows_elevated_wireless(ssid=None, bssid=None):
         parameters=subprocess.list2cmdline(arguments),
     )
     print(
-        "  Windows solicitará permisos de administrador para preparar el Wi-Fi; continúa en esa ventana."
+        "  Windows will request administrator privileges to prepare Wi-Fi; continue in that window."
     )
     if not shell.ShellExecuteExW(ctypes.byref(request)):
-        raise RuntimeError("Windows no concedió la elevación UAC; no se modificó el adaptador.")
+        raise RuntimeError("Windows did not grant UAC elevation; the adapter was not modified.")
     if not request.process:
-        raise RuntimeError("Windows no devolvió el proceso elevado.")
+        raise RuntimeError("Windows did not return the elevated process.")
     try:
         while True:
             try:
                 status = kernel.WaitForSingleObject(request.process, 250)
             except KeyboardInterrupt:
-                print(
-                    "  Cancela la prueba en la ventana de administrador para que restaure el adaptador."
-                )
+                print("  Cancel the test in the administrator window to restore the adapter.")
                 continue
             if status == 0:
                 break
             if status != 258:
-                raise RuntimeError("No se pudo esperar al proceso de administrador.")
+                raise RuntimeError("Unable to wait for the administrator process.")
         code = ctypes.c_uint32()
         if not kernel.GetExitCodeProcess(request.process, ctypes.byref(code)):
-            raise RuntimeError("No se pudo consultar el resultado del proceso de administrador.")
+            raise RuntimeError("Unable to query the administrator process result.")
         return code.value
     finally:
         kernel.CloseHandle(request.process)
@@ -2439,47 +2430,46 @@ def windows_monitor_candidate(interfaces, preferred):
         details = "; ".join(
             safe_text(i.get("display_name", i["name"]))
             + ": "
-            + (
-                i.get("monitor_note")
-                or "modos disponibles = " + ", ".join(i.get("capabilities", []))
-            )
+            + (i.get("monitor_note") or "available modes = " + ", ".join(i.get("capabilities", [])))
             for i in interfaces
             if i.get("backend") == "windows"
         )
         raise RuntimeError(
-            "No hay modo monitor disponible con el controlador Windows actual. "
+            "Monitor mode is unavailable with the current Windows driver. "
             + details
-            + ". Se necesita un adaptador/controlador que exponga monitor; no se puede activar por software si no lo ofrece."
+            + ". An adapter/driver exposing monitor mode is required; software cannot enable unsupported hardware capabilities."
         )
     return min(capable, key=lambda i: (i.get("connected", False), i["name"] != preferred["name"]))
 
 
 def validate_windows_target(ap):
     if sys.platform != "win32":
-        raise RuntimeError("El transporte Npcap requiere Windows")
+        raise RuntimeError("Npcap transport requires Windows")
     if not ap.get("frequency_mhz") or not 2412 <= ap["frequency_mhz"] <= 2484:
         raise RuntimeError(
-            "La prueba WPS en Windows admite 2.4 GHz; para 5 GHz utiliza Linux. El detector no admite 6 GHz."
+            "The Windows WPS test supports 2.4 GHz; use Linux for 5 GHz. The detector does not support 6 GHz."
         )
     if not ap.get("channel") or frequency_channel(ap["frequency_mhz"]) != ap["channel"]:
-        raise RuntimeError("Canal/frecuencia del objetivo incoherente")
+        raise RuntimeError("Inconsistent target channel/frequency")
     if not MAC.fullmatch(ap["bssid"]) or not ap["ssid"] or len(ap["ssid"].encode("utf-8")) > 32:
-        raise ValueError("SSID/BSSID no válido para el detector")
+        raise ValueError("Invalid SSID/BSSID for the detector")
     if ap.get("ssid_hex") and ap["ssid"].encode("utf-8").hex() != ap["ssid_hex"]:
-        raise ValueError("El SSID no es UTF-8; el detector upstream requiere un SSID UTF-8 exacto.")
+        raise ValueError(
+            "The SSID is not UTF-8; the upstream detector requires an exact UTF-8 SSID."
+        )
     if ap.get("in_reg_domain") is False:
-        raise RuntimeError("Windows indica que el AP está fuera del dominio regulatorio.")
+        raise RuntimeError("Windows reports that the AP is outside the regulatory domain.")
 
 
 def require_windows_monitor(ap, iface):
     validate_windows_target(ap)
     if not windows_is_admin():
-        raise RuntimeError("Windows requiere permisos de administrador para preparar el adaptador.")
+        raise RuntimeError("Windows requires administrator privileges to prepare the adapter.")
     mode = wlan_helper(iface["guid"], "mode").casefold()
     channel = wlan_helper(iface["guid"], "channel")
     if mode != "monitor" or channel != str(ap["channel"]):
         raise RuntimeError(
-            f"El controlador no confirmó modo monitor y canal {ap['channel']} tras la preparación automática."
+            f"The driver did not confirm monitor mode and channel {ap['channel']} after automatic setup."
         )
 
 
@@ -2492,24 +2482,18 @@ def prepared_windows_monitor(ap, iface, folder, state):
     modes = [m.strip().casefold() for m in wlan_helper(guid, "modes").split(",")]
     if mode != "monitor" and "monitor" not in modes:
         raise RuntimeError(
-            f"{iface.get('display_name', guid)}: el controlador Windows solo anuncia {', '.join(modes)}; modo monitor no disponible."
+            f"{iface.get('display_name', guid)}: the Windows driver only advertises {', '.join(modes)}; monitor mode unavailable."
         )
     if mode not in {"managed", "monitor"}:
-        raise RuntimeError(
-            "El adaptador está en un modo que no se puede restaurar automáticamente."
-        )
+        raise RuntimeError("The current adapter mode cannot be restored automatically.")
     if not windows_is_admin():
-        raise RuntimeError(
-            "Windows no concedió permisos de administrador para preparar el adaptador."
-        )
+        raise RuntimeError("Windows did not grant administrator privileges to prepare the adapter.")
     state.update(interface=guid, original_mode=mode, requested_channel=ap["channel"], restored=None)
     original_frequency, profile = None, None
     if mode == "monitor":
         original_frequency = int(wlan_helper(guid, "freq"))
         if not 2300 <= original_frequency <= 7125:
-            raise RuntimeError(
-                "El controlador no permite guardar la frecuencia original para restaurarla."
-            )
+            raise RuntimeError("The driver cannot save the original frequency for restoration.")
     else:
         with WindowsWlan() as wlan:
             profile = wlan.connected_profile(guid)
@@ -2532,19 +2516,17 @@ def prepared_windows_monitor(ap, iface, folder, state):
                 if mode == "managed":
                     wlan_helper(guid, "mode", "managed")
                     if wlan_helper(guid, "mode").casefold() != "managed":
-                        raise RuntimeError("El controlador no confirmó el regreso a managed.")
+                        raise RuntimeError("The driver did not confirm the return to managed mode.")
                     if profile:
                         with WindowsWlan() as wlan:
                             wlan.connect_profile(guid, profile)
                 else:
                     wlan_helper(guid, "freq", original_frequency)
                     if int(wlan_helper(guid, "freq")) != original_frequency:
-                        raise RuntimeError("El controlador no confirmó la frecuencia restaurada.")
+                        raise RuntimeError("The driver did not confirm the restored frequency.")
                 state["restored"] = True
             except (Exception, KeyboardInterrupt) as error:
-                state.update(
-                    restored=False, restore_error=str(error) or "Restauración interrumpida"
-                )
+                state.update(restored=False, restore_error=str(error) or "Restoration interrupted")
             finally:
                 dump_json(folder / "radio_setup.json", state)
 
@@ -2554,13 +2536,13 @@ def open_windows_monitor_socket(capture_name):
 
     if not conf.use_pcap:
         raise RuntimeError(
-            "Scapy no encuentra Npcap. Instálalo con soporte raw 802.11 y reinicia la terminal."
+            "Scapy cannot find Npcap. Install it with raw 802.11 support and restart the terminal."
         )
     socket = conf.L2socket(iface=capture_name, monitor=True)
     try:
         if socket.pcap_fd.datalink() != 127:
             raise RuntimeError(
-                "Npcap no entrega Radiotap/802.11; no se puede ejecutar la prueba WPS con tramas Ethernet."
+                "Npcap is not delivering Radiotap/802.11; the WPS test cannot run with Ethernet frames."
             )
     except BaseException:
         socket.close()
@@ -2577,22 +2559,22 @@ def windows_upstream_transport(upstream, iface, ap):
 
     def pinned_channel(interface, requested):
         if interface != iface["name"] or requested != ap["channel"]:
-            raise RuntimeError("El detector intentó cambiar de interfaz/canal")
+            raise RuntimeError("The detector attempted to change the interface/channel")
         if wlan_helper(iface["guid"], "mode") != "monitor" or wlan_helper(
             iface["guid"], "channel"
         ) != str(requested):
             raise RuntimeError(
-                "El modo/canal cambió durante la prueba; se cancela y se restaura el adaptador."
+                "The mode/channel changed during the test; cancelling and restoring the adapter."
             )
 
     def pinned_send(packet, **kwargs):
         if kwargs.pop("iface", None) != iface["name"]:
-            raise RuntimeError("Interfaz de transmisión distinta a la seleccionada")
+            raise RuntimeError("Transmit interface differs from the selected interface")
         return send(packet, iface=capture_name, socket=socket, **kwargs)
 
     def pinned_sniff(**kwargs):
         if kwargs.pop("iface", None) != iface["name"]:
-            raise RuntimeError("Interfaz de captura distinta a la seleccionada")
+            raise RuntimeError("Capture interface differs from the selected interface")
         return sniff(iface=capture_name, monitor=True, **kwargs)
 
     upstream.sendp, upstream.AsyncSniffer, upstream.set_channel = (
@@ -2643,7 +2625,7 @@ def fingerprint_windows(ap, iface, folder, authorized=False):
         )
         result["classification"] = assessment_from_upstream(result["original"], ap)
     except (KeyboardInterrupt, EOFError):
-        result.update(classification="INCONCLUSIVE", error="Interrumpido por el operador")
+        result.update(classification="INCONCLUSIVE", error="Interrupted by the operator")
     except Exception as error:
         result.update(
             classification="ERROR" if prepared else "NOT_TESTED",
@@ -2654,17 +2636,17 @@ def fingerprint_windows(ap, iface, folder, authorized=False):
             try:
                 writer.close()
             except Exception as error:
-                result["limitations"].append("Error cerrando PCAP: " + str(error))
+                result["limitations"].append("Error closing PCAP: " + str(error))
     result["limitations"].extend(
         [
-            "Windows/Npcap: preparación automática de modo monitor/canal 2.4 GHz y restauración registrada en radio_setup.json.",
-            "Recepción/inyección dependen de Npcap y del controlador. La ausencia de respuesta no demuestra que el AP sea seguro.",
-            "Desautenticación bloqueada en transporte: cleanup_sent=false; se conserva target_health upstream.",
+            "Windows/Npcap: automatic monitor mode/2.4 GHz channel setup and restoration recorded in radio_setup.json.",
+            "Reception/injection depend on Npcap and the driver. No response does not prove the AP is safe.",
+            "Deauthentication blocked in transport: cleanup_sent=false; upstream target_health preserved.",
         ]
     )
     if result["radio_setup"].get("restore_error"):
         result["limitations"].append(
-            "No se pudo restaurar el Wi-Fi: " + result["radio_setup"]["restore_error"]
+            "Unable to restore Wi-Fi: " + result["radio_setup"]["restore_error"]
         )
     return result
 
@@ -2690,13 +2672,13 @@ def fingerprint_selected(ap, iface, interfaces, folder, authorized=False):
             prepared = True
             result = fingerprint_linux_monitor(ap, ready, live, folder, authorized=True)
     except (KeyboardInterrupt, EOFError):
-        result.update(classification="INCONCLUSIVE", error="Interrumpido por el operador")
+        result.update(classification="INCONCLUSIVE", error="Interrupted by the operator")
     except Exception as error:
         result["classification"] = "ERROR" if prepared else "NOT_TESTED"
         result["error"] = f"{type(error).__name__}: {error}"
     result["radio_setup"] = state
     if state.get("restore_error"):
-        result["limitations"].append("No se pudo restaurar el Wi-Fi: " + state["restore_error"])
+        result["limitations"].append("Unable to restore Wi-Fi: " + state["restore_error"])
     return result
 
 
@@ -2722,7 +2704,7 @@ def fingerprint_linux_monitor(ap, iface, interfaces, folder, authorized=False):
         upstream = load_upstream()
         state = upstream.inspect_monitor_interface(iface["name"])
         if state.channel is None or not iface.get("frequency_mhz"):
-            raise RuntimeError("No se conoce el canal original; no se puede restaurar la radio.")
+            raise RuntimeError("The original channel is unknown; unable to restore the radio.")
         set_frequency(iface["name"], frequency)
         writer = upstream.PcapWriter(str(folder / "fingerprint.pcap"), linktype=127, sync=True)
         with Spinner("WPS fingerprint / " + ap["bssid"]):
@@ -2737,10 +2719,10 @@ def fingerprint_linux_monitor(ap, iface, interfaces, folder, authorized=False):
         )
         result["classification"] = assessment_from_upstream(result["original"], ap)
         result["limitations"].append(
-            "Desautenticación bloqueada en transporte: cleanup_sent=false; se conserva target_health upstream."
+            "Deauthentication blocked in transport: cleanup_sent=false; upstream target_health preserved."
         )
     except (KeyboardInterrupt, EOFError):
-        result.update(classification="INCONCLUSIVE", error="Interrumpido por el operador")
+        result.update(classification="INCONCLUSIVE", error="Interrupted by the operator")
     except Exception as error:
         result.update(classification="ERROR", error=f"{type(error).__name__}: {error}")
     finally:
@@ -2748,12 +2730,12 @@ def fingerprint_linux_monitor(ap, iface, interfaces, folder, authorized=False):
             try:
                 writer.close()
             except Exception as error:
-                result["limitations"].append("Error cerrando PCAP: " + str(error))
+                result["limitations"].append("Error closing PCAP: " + str(error))
         if state is not None and iface.get("frequency_mhz"):
             try:
                 set_frequency(iface["name"], iface["frequency_mhz"])
             except Exception as error:
-                result["limitations"].append("No se pudo restaurar el canal: " + str(error))
+                result["limitations"].append("Unable to restore the channel: " + str(error))
     return result
 
 
@@ -2778,7 +2760,7 @@ def write_wireless_report(folder, report):
 def wireless_recon(ssid=None, bssid=None):
     system = operating_system()
     if system["family"] == "unsupported":
-        raise RuntimeError("WIRELESS RECON requiere Kali/Linux o Windows.")
+        raise RuntimeError("WIRELESS RECON requires Kali/Linux or Windows.")
     if system["family"] == "linux":
         require_linux()
         if os.geteuid() != 0:
@@ -2786,13 +2768,13 @@ def wireless_recon(ssid=None, bssid=None):
     if bssid is not None:
         bssid = bssid.lower()
         if not MAC.fullmatch(bssid):
-            raise ValueError("BSSID no válido")
+            raise ValueError("Invalid BSSID")
     if ssid is not None and (not ssid or len(ssid.encode("utf-8")) > 32):
-        raise ValueError("El SSID debe tener entre 1 y 32 bytes UTF-8.")
+        raise ValueError("The SSID must contain 1 to 32 UTF-8 bytes.")
     interfaces = detect_wireless_interfaces()
     if not interfaces:
         raise RuntimeError(
-            "No hay interfaces Wi-Fi. En Kali Live comprueba firmware/rfkill; en una VM necesitas USB Wi-Fi passthrough. Ethernet virtual no permite esta prueba."
+            "No Wi-Fi interfaces found. In Kali Live, check firmware/rfkill; a VM requires USB Wi-Fi passthrough. Virtual Ethernet cannot perform this test."
         )
     if (
         any(
@@ -2809,14 +2791,14 @@ def wireless_recon(ssid=None, bssid=None):
         if connected
         else interfaces[0]
         if len(interfaces) == 1
-        else select_item(interfaces, "Interfaz Wi-Fi")
+        else select_item(interfaces, "Wi-Fi interface")
     )
     if iface is None:
         return
     explicit = ssid is not None
     scope_ssid = ssid if explicit else iface.get("connected_ssid")
     if scope_ssid is not None and not isinstance(scope_ssid, str):
-        raise ValueError("El controlador no devolvió un SSID de conexión válido.")
+        raise ValueError("The driver did not return a valid connection SSID.")
     folder = report_folder("wireless")
     report = {
         "tool": "POLTERHEIST",
@@ -2857,18 +2839,18 @@ def wireless_recon(ssid=None, bssid=None):
         write_wireless_report(folder, report)
         if not scope_ssid:
             report["not_tested_reason"] = (
-                "No hay una red conectada. Conéctate a tu Wi-Fi o indica su nombre con --ssid."
+                "No network is connected. Connect to your Wi-Fi or specify its name with --ssid."
             )
             return
         if not targets:
             report["not_tested_reason"] = (
-                "No se observó el SSID/BSSID autorizado en el descubrimiento."
+                "The authorized SSID/BSSID was not observed during discovery."
             )
             return
         print(
-            "  Fingerprint de "
+            "  Fingerprint for "
             + safe_text(repr(scope_ssid))
-            + f": {len(targets)} BSSID. Preparación y restauración automáticas."
+            + f": {len(targets)} BSSID(s). Automatic setup and restoration."
         )
         for index, target in enumerate(targets, 1):
             target_folder = folder / "targets" / target["bssid"].replace(":", "")
@@ -2892,7 +2874,7 @@ def wireless_recon(ssid=None, bssid=None):
                 current = detect_wireless_interfaces()
                 if iface.get("backend") == "windows":
                     if not wlan_helper_path():
-                        raise RuntimeError("Falta Npcap con soporte raw 802.11.")
+                        raise RuntimeError("Npcap with raw 802.11 support is missing.")
                     validate_windows_target(target)
                     radio = windows_monitor_candidate(current, iface)
                 else:
@@ -2901,12 +2883,12 @@ def wireless_recon(ssid=None, bssid=None):
                 target_report["assessment"] = target["assessment"] = "INCONCLUSIVE"
                 target_report["status"] = "fingerprinting"
                 write_wireless_report(target_folder, target_report)
-                print(f"  Evaluando {index}/{len(targets)}: ID {target['id']}")
+                print(f"  Assessing {index}/{len(targets)}: ID {target['id']}")
                 outcome = fingerprint_selected(
                     target, radio, current, target_folder, authorized=True
                 )
             except (KeyboardInterrupt, EOFError):
-                outcome.update(classification="INCONCLUSIVE", error="Interrumpido por el operador")
+                outcome.update(classification="INCONCLUSIVE", error="Interrupted by the operator")
             except (RuntimeError, ValueError, OSError) as error:
                 outcome["error"] = str(error)
             target_report.update(
@@ -2941,7 +2923,7 @@ def wireless_recon(ssid=None, bssid=None):
                 report["assessment"] = None
             write_wireless_report(folder, report)
             radio_state = outcome.get("radio_setup") or {}
-            if outcome["error"] == "Interrumpido por el operador" or radio_state.get(
+            if outcome["error"] == "Interrupted by the operator" or radio_state.get(
                 "restore_error"
             ):
                 report["status"] = (
@@ -2952,7 +2934,7 @@ def wireless_recon(ssid=None, bssid=None):
             report["status"] = "completed"
     except (KeyboardInterrupt, EOFError):
         report["status"] = "cancelled"
-        report["not_tested_reason"] = "Interrumpido por el operador; se conservan las evidencias."
+        report["not_tested_reason"] = "Interrupted by the operator; preserving evidence."
     except Exception as error:
         report.update(status="error", error=str(error))
         raise
@@ -2974,36 +2956,38 @@ def wireless_recon(ssid=None, bssid=None):
                 )
             radio = result.get("radio_setup") or {}
             if radio.get("restore_error"):
-                print("  No se pudo restaurar el Wi-Fi: " + safe_text(radio["restore_error"]))
-        print(f"  Informe y evidencias: {folder}")
+                print("  Unable to restore Wi-Fi: " + safe_text(radio["restore_error"]))
+        print(f"  Report and evidence: {folder}")
 
 
 def portal_validate(config):
     """Validate all values before passing them to NetworkManager or nftables."""
     if config["mode"] not in {"wifi", "router"}:
-        raise ValueError("Modo de portal no válido")
+        raise ValueError("Invalid portal mode")
     for key in ("lan", "wan"):
         if not re.fullmatch(r"[A-Za-z0-9_.:-]{1,15}", config[key]):
-            raise ValueError("Nombre de interfaz no válido")
+            raise ValueError("Invalid interface name")
     if config["lan"] == config["wan"]:
-        raise ValueError("El portal necesita dos interfaces distintas: Internet y clientes.")
+        raise ValueError("The portal requires two distinct interfaces: Internet and clients.")
     network = ipaddress.IPv4Network(config["network"])
     private = ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16")
     if network.prefixlen != 24 or not any(
         network.subnet_of(ipaddress.IPv4Network(n)) for n in private
     ):
-        raise ValueError("La red del portal debe ser una subred privada IPv4 /24.")
+        raise ValueError("The portal network must be a private IPv4 /24 subnet.")
     if not 10 <= config.get("session_seconds", 3600) <= 86400:
-        raise ValueError("Duración de sesión no válida")
+        raise ValueError("Invalid session duration")
     if config["mode"] == "wifi":
         ssid = config["ssid"]
         if not 1 <= len(ssid.encode("utf-8")) <= 32 or any(ord(c) < 32 for c in ssid):
-            raise ValueError("El nombre Wi-Fi debe tener entre 1 y 32 bytes UTF-8, sin controles.")
+            raise ValueError(
+                "The Wi-Fi name must contain 1 to 32 UTF-8 bytes without control characters."
+            )
         password = config["password"]
         if not 8 <= len(password) <= 63 or any(not 32 <= ord(c) <= 126 for c in password):
-            raise ValueError("La contraseña Wi-Fi debe tener entre 8 y 63 caracteres ASCII.")
+            raise ValueError("The Wi-Fi password must contain 8 to 63 ASCII characters.")
         if not 1 <= config["channel"] <= 11:
-            raise ValueError("El portal Wi-Fi utiliza un canal permitido de 2.4 GHz (1–11).")
+            raise ValueError("The Wi-Fi portal uses a permitted 2.4 GHz channel (1–11).")
     return network
 
 
@@ -3033,7 +3017,7 @@ def portal_profile(config, connection):
 def portal_nft_rules(config, table):
     network = portal_validate(config)
     if not re.fullmatch(r"polterheist_[0-9a-f]{12}", table):
-        raise ValueError("Nombre de tabla de portal no válido")
+        raise ValueError("Invalid portal table name")
     lan, wan = config["lan"], config["wan"]
     # These hooks only govern the dedicated client interface. Existing tables survive.
     return f'''table inet {table} {{
@@ -3077,10 +3061,10 @@ def portal_nft(source, check=False):
 
 def portal_grant(table, ip, mac, seconds):
     if not re.fullmatch(r"polterheist_[0-9a-f]{12}", table) or not MAC.fullmatch(mac):
-        raise ValueError("Identidad de portal no válida")
+        raise ValueError("Invalid portal identity")
     ip = str(ipaddress.IPv4Address(ip))
     if not 10 <= seconds <= 86400:
-        raise ValueError("Duración de sesión no válida")
+        raise ValueError("Invalid session duration")
     portal_nft(
         f"add element inet {table} clients {{ {ip} . {mac} timeout {seconds}s }}\n"
         f"add element inet {table} destinations {{ {ip} timeout {seconds}s }}\n"
@@ -3094,7 +3078,7 @@ def portal_identity(lan, ip):
         mac = row.get("lladdr", "").lower()
         if row.get("dst") == ip and MAC.fullmatch(mac):
             return mac
-    raise ValueError("No se pudo identificar al dispositivo en la interfaz del portal.")
+    raise ValueError("Unable to identify the device on the portal interface.")
 
 
 class PortalAccess:
@@ -3116,7 +3100,7 @@ class PortalAccess:
             self.network.broadcast_address,
             self.network[1],
         ):
-            raise ValueError("Dispositivo fuera de la red del portal")
+            raise ValueError("Device is outside the portal network")
         return str(address), self.identity(str(address))
 
     def page(self, ip):
@@ -3130,7 +3114,7 @@ class PortalAccess:
             # Refreshing a captive browser must not exhaust the token pool.
             self.pending = {k: v for k, v in self.pending.items() if v[0] != client}
             if len(self.pending) >= 256:
-                raise ValueError("Portal ocupado; vuelve a intentarlo")
+                raise ValueError("Portal busy; try again")
             token = secrets.token_urlsafe(32)
             self.pending[token] = (client, now + 300)
             return token
@@ -3140,26 +3124,26 @@ class PortalAccess:
         with self.lock:
             entry = self.pending.get(token)
             if entry is None or entry[0] != client or entry[1] <= time.monotonic():
-                raise ValueError("La página ha caducado; vuelve a abrir el portal")
+                raise ValueError("This page has expired; reopen the portal")
             self.grant(*client, self.seconds)
             del self.pending[token]
             self.active[client] = time.monotonic() + self.seconds
 
 
 def portal_page(title, token=None, connected=False, preview=False):
-    message = "Acepta el acceso para navegar por Internet desde esta red."
+    message = "Accept access to browse the Internet from this network."
     form = (
         '<form method="post" action="/accept"><input type="hidden" name="token" value="'
         + html.escape(token or "", quote=True)
-        + '"><button name="accept" value="yes">Aceptar y navegar</button></form>'
+        + '"><button name="accept" value="yes">Accept and connect</button></form>'
     )
     if preview:
-        message = "Vista previa del portal. Esta ventana no modifica el acceso a Internet."
-        form = "<button disabled>Aceptar y navegar</button>"
+        message = "Portal preview. This window does not change Internet access."
+        form = "<button disabled>Accept and connect</button>"
     elif connected:
-        message = "Acceso habilitado. Ya puedes continuar navegando."
+        message = "Access granted. You can now continue browsing."
         form = ""
-    return f"""<!doctype html><html lang="es"><meta charset="utf-8">
+    return f"""<!doctype html><html lang="en"><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>{html.escape(title)} · POLTERHEIST</title>
 <style>body{{margin:0;background:#0b1211;color:#e8f4ee;font:18px system-ui;display:grid;
@@ -3168,8 +3152,8 @@ border:1px solid #35554a;border-radius:20px}}small{{color:#85bca3;letter-spacing
 h1{{overflow-wrap:anywhere}}p{{line-height:1.6;color:#c4d8cd}}button{{padding:16px 24px;
 border:0;border-radius:10px;background:#8ff0bb;color:#082b1a;font:700 17px system-ui;
 cursor:pointer;width:100%}}button:disabled{{opacity:.55;cursor:default}}</style>
-<main><small>POLTERHEIST · ACCESO WI-FI</small><h1>{html.escape(title)}</h1>
-<p>{message}</p>{form}<p><small>Usa esta conexión de forma responsable.</small></p></main></html>"""
+<main><small>POLTERHEIST · WI-FI ACCESS</small><h1>{html.escape(title)}</h1>
+<p>{message}</p>{form}<p><small>Use this connection responsibly.</small></p></main></html>"""
 
 
 class PortalServer(http.server.ThreadingHTTPServer):
@@ -3243,18 +3227,18 @@ class PortalHandler(http.server.BaseHTTPRequestHandler):
             return
         try:
             if self.headers.get_content_type() != "application/x-www-form-urlencoded":
-                raise ValueError("Formulario no válido")
+                raise ValueError("Invalid form")
             if (
                 self.headers.get("Transfer-Encoding")
                 or len(self.headers.get_all("Content-Length", [])) != 1
             ):
-                raise ValueError("Longitud no válida")
+                raise ValueError("Invalid length")
             length = int(self.headers["Content-Length"])
             if not 1 <= length <= 2048:
-                raise ValueError("Formulario demasiado grande")
+                raise ValueError("Form too large")
             fields = parse_qs(self.rfile.read(length).decode("ascii"), max_num_fields=3)
             if fields.get("accept") != ["yes"] or len(fields.get("token", [])) != 1:
-                raise ValueError("Formulario no válido")
+                raise ValueError("Invalid form")
             self.server.access.accept(self.client_address[0], fields["token"][0])
             address, port = self.server.server_address
             self.reply(303, location=f"http://{address}:{port}/connected")
@@ -3263,9 +3247,9 @@ class PortalHandler(http.server.BaseHTTPRequestHandler):
 
 
 def portal_preview():
-    with PortalServer(("127.0.0.1", 8080), "Bienvenido", None) as server:
-        print("  Vista previa local: http://127.0.0.1:8080 — Ctrl+C para volver.")
-        print("  La vista previa no crea Wi-Fi ni controla el acceso de otros dispositivos.")
+    with PortalServer(("127.0.0.1", 8080), "Welcome", None) as server:
+        print("  Local preview: http://127.0.0.1:8080 — Ctrl+C to return.")
+        print("  Preview does not create Wi-Fi or control access for other devices.")
         try:
             server.serve_forever(poll_interval=0.25)
         except KeyboardInterrupt:
@@ -3280,27 +3264,27 @@ def portal_candidate_rows(links, radios, wan, mode):
         kind = link.get("linkinfo", {}).get("info_kind", "")
         category = "Wi-Fi" if radio else kind or link.get("link_type", "?")
         if name == wan:
-            reason = "Salida a Internet; en uso"
+            reason = "Internet uplink; in use"
         elif link.get("link_type") != "ether":
-            reason = "No transporta clientes Ethernet/Wi-Fi"
+            reason = "Cannot carry Ethernet/Wi-Fi clients"
         elif link.get("master") or kind == "bridge":
-            reason = "Puente de otra red; no es una interfaz libre"
+            reason = "Bridge for another network; not a free interface"
         elif mode == "wifi" and radio is None:
-            reason = "Ethernet no puede emitir una Wi-Fi"
+            reason = "Ethernet cannot broadcast Wi-Fi"
         elif mode == "wifi" and "AP" not in radio.get("capabilities", []):
-            reason = "El controlador no anuncia modo AP"
+            reason = "The driver does not advertise AP mode"
         elif mode == "router" and radio is not None:
-            reason = "Se necesita Ethernet hacia el router/AP"
+            reason = "An Ethernet connection to the router/AP is required"
         elif any(a.get("scope") == "global" for a in link.get("addr_info", [])):
-            reason = "Tiene direcciones asignadas; en uso"
+            reason = "Has assigned addresses; in use"
         else:
-            reason = "Disponible para comprobar"
+            reason = "Available for checking"
         rows.append(
             {
                 "name": name,
                 "type": category,
                 "reason": reason,
-                "candidate": reason == "Disponible para comprobar",
+                "candidate": reason == "Available for checking",
                 "link": link,
             }
         )
@@ -3315,7 +3299,7 @@ def portal_virtualization():
 def portal_explain_interfaces(links, radios, wan, mode, virtualization=None):
     print(tint("\nPOLTERHEIST :: PORTAL / INTERFACES"))
     table(
-        ["INTERFAZ", "TIPO", "DISPONIBILIDAD"],
+        ["INTERFACE", "TYPE", "AVAILABILITY"],
         [
             [r["name"], r["type"], r["reason"]]
             for r in portal_candidate_rows(links, radios, wan, mode)
@@ -3324,37 +3308,37 @@ def portal_explain_interfaces(links, radios, wan, mode, virtualization=None):
     )
     if virtualization:
         label = "VirtualBox" if virtualization == "oracle" else virtualization
-        print("  Entorno virtual detectado: " + safe_text(label))
+        print("  Virtual environment detected: " + safe_text(label))
     if radios is None:
-        print("  No se pudo comprobar la presencia de antenas Wi-Fi; revisa iw y el controlador.")
+        print("  Unable to check for Wi-Fi radios; check iw and the driver.")
     elif not radios:
         print(
-            "  Linux no detecta ninguna antena Wi-Fi. No puede crear un SSID ni ejecutar el fingerprint inalámbrico."
+            "  Linux detects no Wi-Fi radio. It cannot create an SSID or run wireless fingerprinting."
         )
         if virtualization:
             print(
-                "  Poner la VM en modo puente sobre el Wi-Fi del host no le entrega la antena: sigue siendo Ethernet virtual."
+                "  Bridging the VM over the host Wi-Fi does not expose the radio: it is still virtual Ethernet."
             )
             print(
-                "  Para emitir Wi-Fi: conecta una antena USB compatible directamente a la VM, o arranca Kali Live en el PC."
+                "  To broadcast Wi-Fi: pass a compatible USB adapter to the VM, or boot Kali Live on the PC."
             )
     if mode == "wifi":
         print(
-            "  Alternativa con una sola antena: Internet por cable Ethernet o USB tethering del móvil y Wi-Fi libre para el AP."
+            "  Single-radio alternative: use Ethernet or phone USB tethering for Internet and leave Wi-Fi free for the AP."
         )
         print(
-            "  Cliente + AP en una misma radio depende del controlador y no está implementado en este portal."
+            "  Client + AP on the same radio depends on the driver and is not implemented in this portal."
         )
     else:
         print(
-            "  Para un router/AP externo hace falta una interfaz Ethernet de clientes separada de la salida a Internet."
+            "  An external router/AP needs a client Ethernet interface separate from the Internet uplink."
         )
         if virtualization:
             print(
-                "  Un segundo adaptador virtual permite un laboratorio; para un AP físico debe conectarse al Ethernet físico dedicado."
+                "  A second virtual adapter supports a lab; for a physical AP it must bridge to dedicated physical Ethernet."
             )
     print(
-        "  La vista previa [3] → [v] funciona sin una segunda interfaz, pero no controla el acceso de otros equipos."
+        "  Preview [3] → [v] works without a second interface but does not control access for other devices."
     )
 
 
@@ -3373,12 +3357,12 @@ def portal_check():
         try:
             radios = detect_wireless_interfaces()
         except RuntimeError as error:
-            print("  No se pudieron consultar las radios: " + safe_text(error))
+            print("  Unable to query radios: " + safe_text(error))
     else:
-        print("  Falta iw; instala las dependencias con --setup para consultar las radios.")
+        print("  iw is missing; install dependencies with --setup to query radios.")
     portal_explain_interfaces(links, radios, wan, "wifi", portal_virtualization())
     if not wan:
-        print("  No hay ruta predeterminada IPv4 para compartir Internet.")
+        print("  No default IPv4 route is available to share Internet access.")
     if shutil.which("nft"):
         firewall = run_quiet(["nft", "--json", "list", "ruleset"])
         if firewall is not None and firewall.returncode == 0:
@@ -3391,13 +3375,91 @@ def portal_check():
             )
             if hooks:
                 print(
-                    "  Otro firewall/pasarela está activo: "
+                    "  Another firewall/gateway is active: "
                     + safe_text(", ".join(hooks))
-                    + ". El portal actual no modifica esas reglas."
+                    + ". This portal does not modify those rules."
                 )
         else:
-            print("  Para comprobar también el firewall, ejecuta --portal-check con sudo.")
+            print("  Run --portal-check with sudo to also inspect the firewall.")
     return 0
+
+
+class PortalInterfaceUnavailable(RuntimeError):
+    """A client interface failed read-only checks; another can be tried safely."""
+
+
+def portal_interface_state(config, links, radios):
+    """Shared eligibility checks for discovery and the last check before activation."""
+    lan = next((i for i in links if i["ifname"] == config["lan"]), None)
+    if (
+        lan is None
+        or config["lan"] == config["wan"]
+        or lan.get("link_type") != "ether"
+        or lan.get("master")
+        or lan.get("linkinfo", {}).get("info_kind") == "bridge"
+    ):
+        raise PortalInterfaceUnavailable(
+            "Use a dedicated client Ethernet/Wi-Fi interface outside bridges."
+        )
+    if any(a.get("scope") == "global" for a in lan.get("addr_info", [])):
+        raise PortalInterfaceUnavailable("The client interface already has addresses.")
+    managed, connection = linux_nm_state(config["lan"])
+    if managed is None:
+        raise PortalInterfaceUnavailable("NetworkManager cannot query this interface.")
+    if connection:
+        raise PortalInterfaceUnavailable("The client interface has an active connection.")
+    channels = []
+    radio = next((r for r in (radios or []) if r["name"] == config["lan"]), None)
+    if config["mode"] == "wifi":
+        if (
+            radio is None
+            or radio.get("mode") != "managed"
+            or "AP" not in radio.get("capabilities", [])
+        ):
+            raise PortalInterfaceUnavailable("The interface must be managed and support AP mode.")
+        if radio.get("connected"):
+            raise PortalInterfaceUnavailable("The Wi-Fi interface is already connected.")
+        if not radio.get("phy") or any(
+            r.get("phy") == radio["phy"] and r["name"] != radio["name"] for r in radios
+        ):
+            raise PortalInterfaceUnavailable("The radio must have a known, dedicated PHY.")
+        channels = [
+            f["channel"]
+            for f in radio.get("frequencies", [])
+            if 1 <= f["channel"] <= 11
+            and not (f["disabled"] or f["no_ir"] or f["radar"])
+            and f["frequency_mhz"] < 2500
+        ]
+        if not channels or ("channel" in config and config["channel"] not in channels):
+            raise PortalInterfaceUnavailable("No permitted AP channel is available on this radio.")
+    elif radio is not None or Path("/sys/class/net", config["lan"], "wireless").exists():
+        raise PortalInterfaceUnavailable("Router/AP mode requires a client Ethernet interface.")
+    return lan, managed, channels
+
+
+def portal_interface_plans(links, radios, wan, preferred, network):
+    """Check every free interface, preferred mode first, without changing any adapter."""
+    plans = []
+    for mode in (preferred, "router" if preferred == "wifi" else "wifi"):
+        for row in portal_candidate_rows(links, radios, wan, mode):
+            if not row["candidate"]:
+                continue
+            config = {
+                "mode": mode,
+                "lan": row["name"],
+                "wan": wan,
+                "network": network,
+                "session_seconds": 3600,
+            }
+            try:
+                _, _, channels = portal_interface_state(config, links, radios)
+            except PortalInterfaceUnavailable as error:
+                print(f"  Skipping {safe_text(row['name'])}: {safe_text(error)}")
+                continue
+            if mode == "wifi":
+                config["channel"] = next((c for c in (1, 6, 11) if c in channels), channels[0])
+            plans.append(config)
+    return plans
 
 
 def portal_preflight(config):
@@ -3405,60 +3467,27 @@ def portal_preflight(config):
     require_tools("nmcli", "ip", "nft", "sysctl", "dnsmasq")
     network = portal_validate(config)
     links = json.loads(linux_command(["ip", "-json", "-details", "address", "show"]))
-    lan = next((i for i in links if i["ifname"] == config["lan"]), None)
-    if (
-        lan is None
-        or lan.get("link_type") != "ether"
-        or lan.get("master")
-        or lan.get("linkinfo", {}).get("info_kind") == "bridge"
-    ):
-        raise RuntimeError(
-            "Usa una interfaz de clientes Ethernet/Wi-Fi dedicada, fuera de bridges."
-        )
-    if any(a.get("scope") == "global" for a in lan.get("addr_info", [])):
-        raise RuntimeError("La interfaz de clientes ya tiene direcciones. Usa una interfaz libre.")
-    managed, connection = linux_nm_state(config["lan"])
-    if managed is None:
-        raise RuntimeError("NetworkManager debe estar en funcionamiento para crear el portal.")
-    if connection:
-        raise RuntimeError(
-            "La interfaz de clientes tiene una conexión activa; selecciona otra libre."
-        )
+    radios = None
+    if config["mode"] == "wifi":
+        require_tools("iw")
+        radios = detect_wireless_interfaces()
+    lan, managed, _ = portal_interface_state(config, links, radios)
     routes = json.loads(linux_command(["ip", "-json", "-4", "route", "show"]))
     if not any(r.get("dst") == "default" and r.get("dev") == config["wan"] for r in routes):
-        raise RuntimeError("La interfaz de Internet debe tener una ruta predeterminada activa.")
+        raise RuntimeError("The Internet interface must have an active default route.")
     for route in routes:
         if route.get("dst") not in (None, "default"):
             if network.overlaps(ipaddress.IPv4Network(route["dst"], strict=False)):
-                raise RuntimeError("La subred del portal coincide con una ruta existente.")
+                raise RuntimeError("The portal subnet overlaps an existing route.")
     rules = json.loads(linux_command(["nft", "--json", "list", "ruleset"]))
     if any(
         item.get("chain", {}).get("hook") in {"forward", "input"}
         for item in rules.get("nftables", [])
     ):
         raise RuntimeError(
-            "Ya hay un firewall/pasarela activo. El portal requiere un equipo dedicado sin reglas "
-            "input/forward previas; no se borrarán las reglas existentes."
+            "Another firewall/gateway is active. The portal requires a dedicated machine without existing "
+            "input/forward rules; existing rules will not be deleted."
         )
-    if config["mode"] == "wifi":
-        require_tools("iw")
-        interfaces = detect_wireless_interfaces()
-        radio = next((i for i in interfaces if i["name"] == config["lan"]), None)
-        if radio is None or radio["mode"] != "managed" or "AP" not in radio["capabilities"]:
-            raise RuntimeError("El controlador debe admitir modo AP para crear una Wi-Fi.")
-        if any(i["phy"] == radio["phy"] and i["name"] != radio["name"] for i in interfaces):
-            raise RuntimeError("La radio de clientes no puede compartir PHY con otra interfaz.")
-        allowed = [
-            f["channel"]
-            for f in radio["frequencies"]
-            if not (f["disabled"] or f["no_ir"] or f["radar"]) and f["frequency_mhz"] < 2500
-        ]
-        if config["channel"] not in allowed:
-            raise RuntimeError(
-                "El canal elegido no permite crear un AP según la regulación actual."
-            )
-    elif Path("/sys/class/net", config["lan"], "wireless").exists():
-        raise RuntimeError("El modo router/AP utiliza una interfaz Ethernet hacia su puerto LAN.")
     return {
         "original_managed": managed,
         "original_up": "UP" in lan.get("flags", []),
@@ -3491,7 +3520,9 @@ def portal_verify_restored(config, state):
         or any(a.get("scope") == "global" for a in links[0].get("addr_info", []))
         or linux_command(["sysctl", "-n", "net.ipv4.ip_forward"]) != state["original_forward"]
     ):
-        raise RuntimeError("No se confirmó la restauración de la interfaz/forwarding originales.")
+        raise RuntimeError(
+            "Restoration of the original interface/forwarding state was not confirmed."
+        )
 
 
 @contextmanager
@@ -3502,7 +3533,7 @@ def portal_lock():
         try:
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError as error:
-            raise RuntimeError("Ya hay un portal POLTERHEIST activo.") from error
+            raise RuntimeError("A POLTERHEIST portal is already active.") from error
         yield
 
 
@@ -3548,7 +3579,7 @@ def portal_network(config, folder):
                 )
                 current = linux_nm_state(config["lan"])
                 if current != (True, connection):
-                    raise RuntimeError("NetworkManager no confirmó la conexión del portal.")
+                    raise RuntimeError("NetworkManager did not confirm the portal connection.")
                 addresses = json.loads(
                     linux_command(["ip", "-json", "address", "show", "dev", config["lan"]])
                 )
@@ -3556,7 +3587,7 @@ def portal_network(config, folder):
                 if not any(
                     a.get("local") == expected for i in addresses for a in i.get("addr_info", [])
                 ):
-                    raise RuntimeError("La interfaz no tiene la dirección de la pasarela.")
+                    raise RuntimeError("The interface does not have the gateway address.")
                 state["status"] = "active"
                 dump_json(folder / "network.json", state)
                 yield table, state
@@ -3567,13 +3598,13 @@ def portal_network(config, folder):
                     try:
                         action()
                     except (Exception, KeyboardInterrupt) as error:
-                        errors.append(str(error) or "Restauración interrumpida")
+                        errors.append(str(error) or "Restoration interrupted")
 
                 def remove_connection():
                     # Deletion deactivates this UUID only and removes the temporary keyfile.
                     present = run_quiet(["nmcli", "connection", "show", "uuid", connection])
                     if present is None:
-                        raise RuntimeError("No se pudo consultar la conexión temporal")
+                        raise RuntimeError("Unable to query the temporary connection")
                     if present.returncode == 0:
                         linux_command(
                             ["nmcli", "--wait", "15", "connection", "delete", "uuid", connection]
@@ -3631,7 +3662,7 @@ def portal_network(config, folder):
                 if firewall and not errors:
                     present = run_quiet(["nft", "list", "table", "inet", table])
                     if present is None:
-                        errors.append("No se pudo consultar la tabla de protección")
+                        errors.append("Unable to query the guard table")
                     elif present.returncode == 0:
                         restore(lambda: portal_nft(f"delete table inet {table}\n"))
                 state.update(
@@ -3641,11 +3672,9 @@ def portal_network(config, folder):
                 )
                 dump_json(folder / "network.json", state)
                 for error in errors:
-                    print("  Restauración pendiente: " + safe_text(error))
+                    print("  Restoration pending: " + safe_text(error))
                 if errors:
-                    print(
-                        f"  Protección conservada: {table}. Estado guardado en {folder / 'network.json'}"
-                    )
+                    print(f"  Guard retained: {table}. State saved in {folder / 'network.json'}")
 
 
 def portal_run(config):
@@ -3668,13 +3697,11 @@ def portal_run(config):
                 config.get("session_seconds", 3600),
             )
             with PortalServer(
-                (str(network[1]), 8080), config.get("ssid") or "Bienvenido", access
+                (str(network[1]), 8080), config.get("ssid") or "Welcome", access
             ) as server:
+                print(f"  Portal active: http://{network[1]}:8080 | Ctrl+C to stop and restore.")
                 print(
-                    f"  Portal activo: http://{network[1]}:8080 | Ctrl+C para detener y restaurar."
-                )
-                print(
-                    "  Si el dispositivo no abre el portal, entra en esa dirección desde su navegador."
+                    "  If the device does not open the portal, visit that address in its browser."
                 )
                 try:
                     server.serve_forever(poll_interval=0.25)
@@ -3682,14 +3709,14 @@ def portal_run(config):
                     pass
     finally:
         signal.signal(signal.SIGTERM, previous)
-        print(f"  Estado del portal: {folder}")
+        print(f"  Portal state: {folder}")
 
 
 def captive_portal(choice=None):
     print(tint("\nPOLTERHEIST :: CAPTIVE PORTAL"))
-    print("  [1] Crear una Wi-Fi (nombre y contraseña a elegir) — Kali/Linux")
-    print("  [2] Usar un router como punto de acceso — Kali/Linux")
-    print("  [v] Vista previa local — Windows/Linux\n  [q] Volver")
+    print("  [1] Create Wi-Fi (choose a name and password) — Kali/Linux")
+    print("  [2] Use a router as an access point — Kali/Linux")
+    print("  [v] Local preview — Windows/Linux\n  [q] Back")
     if choice is None:
         choice = input("  > ").strip().lower()
     if choice == "v":
@@ -3712,45 +3739,23 @@ def captive_portal(choice=None):
             check=False,
         ).returncode
     require_tools("ip", "nmcli", "nft", "dnsmasq")
-    if choice == "1":
-        require_tools("iw")
-    print(
-        "  Se necesitan dos interfaces: Internet y clientes. La interfaz de clientes debe estar libre."
-    )
+    print("  Two interfaces are required: Internet and clients. The client interface must be free.")
     routes = json.loads(linux_command(["ip", "-json", "-4", "route", "show"]))
     defaults = sorted(
         (r for r in routes if r.get("dst") == "default" and r.get("dev")),
         key=lambda r: r.get("metric", 0),
     )
     if not defaults:
-        raise RuntimeError("Conecta primero el equipo a Internet.")
+        raise RuntimeError("Connect this computer to the Internet first.")
     wan = defaults[0]["dev"]
-    print("  Salida a Internet: " + safe_text(wan))
-    radios = detect_wireless_interfaces() if shutil.which("iw") else None
+    print("  Internet uplink: " + safe_text(wan))
+    radios = None
+    if shutil.which("iw"):
+        try:
+            radios = detect_wireless_interfaces()
+        except RuntimeError as error:
+            print("  Wi-Fi discovery unavailable: " + safe_text(error))
     links = json.loads(linux_command(["ip", "-json", "-details", "address", "show"]))
-    mode = "wifi" if choice == "1" else "router"
-    candidates = [
-        r["link"] for r in portal_candidate_rows(links, radios, wan, mode) if r["candidate"]
-    ]
-    if choice == "2":
-        print("  Conecta un puerto LAN del router a la interfaz de clientes del PC.")
-        print(
-            "  El router debe estar en modo AP/bridge, con DHCP desactivado y sin otra salida a Internet."
-        )
-        print("  Los clientes conservarán el nombre Wi-Fi configurado en ese router.")
-        candidates = [
-            i for i in candidates if not Path("/sys/class/net", i["ifname"], "wireless").exists()
-        ]
-    if not candidates:
-        portal_explain_interfaces(links, radios, wan, mode, portal_virtualization())
-        raise RuntimeError(
-            "La topología actual no ofrece una interfaz de clientes compatible. Consulta el diagnóstico anterior; añadir Ethernet virtual no crea una antena Wi-Fi."
-        )
-    selected = select_item(
-        [dict(i, name=i["ifname"]) for i in candidates], "Interfaz para clientes"
-    )
-    if selected is None:
-        return
     used = [
         ipaddress.IPv4Network(r["dst"], strict=False)
         for r in routes
@@ -3765,37 +3770,50 @@ def captive_portal(choice=None):
         None,
     )
     if network is None:
-        raise RuntimeError("No se encontró una subred libre para el portal.")
-    config = {
-        "mode": "wifi" if choice == "1" else "router",
-        "lan": selected["ifname"],
-        "wan": wan,
-        "network": network,
-        "session_seconds": 3600,
-    }
-    if choice == "1":
-        config["ssid"] = (
-            input("  Nombre de la nueva Wi-Fi [POLTERHEIST]: ").strip() or "POLTERHEIST"
-        )
-        config["password"] = getpass.getpass("  Contraseña Wi-Fi (8–63 caracteres): ")
-        radio = next(r for r in radios if r["name"] == config["lan"])
-        channels = [
-            f["channel"]
-            for f in radio["frequencies"]
-            if 1 <= f["channel"] <= 11
-            and not (f["disabled"] or f["no_ir"] or f["radar"])
-            and f["frequency_mhz"] < 2500
-        ]
-        if not channels:
-            raise RuntimeError("La radio no tiene canales permitidos para crear el AP.")
-        config["channel"] = next((c for c in (1, 6, 11) if c in channels), channels[0])
-    elif (
-        input("  Escribe AP cuando el router esté configurado y conectado como se indica: ").strip()
-        != "AP"
-    ):
-        return
-    portal_validate(config)
-    return portal_run(config)
+        raise RuntimeError("No free subnet was found for the portal.")
+    preferred = "wifi" if choice == "1" else "router"
+    plans = portal_interface_plans(links, radios, wan, preferred, network)
+    wifi_settings = None
+    router_ready = False
+    previous_mode = preferred
+    for config in plans:
+        mode = config["mode"]
+        if mode != previous_mode:
+            label = "Create Wi-Fi" if mode == "wifi" else "External router/AP"
+            print("  No usable interface remains in the selected mode. Trying " + label + ".")
+        previous_mode = mode
+        print("  Trying client interface: " + safe_text(config["lan"]))
+        if mode == "wifi":
+            if wifi_settings is None:
+                wifi_settings = {
+                    "ssid": input("  New Wi-Fi name [POLTERHEIST]: ").strip() or "POLTERHEIST",
+                    "password": getpass.getpass("  Wi-Fi password (8–63 characters): "),
+                }
+            config.update(wifi_settings)
+        elif not router_ready:
+            print("  Connect a router LAN port to the client interface on this PC.")
+            print(
+                "  Use AP/bridge mode, disable its DHCP, and disconnect its other Internet uplink."
+            )
+            print("  Clients will use the Wi-Fi name configured on that router.")
+            if (
+                input(
+                    "  Type AP when the router is configured and connected as described: "
+                ).strip()
+                != "AP"
+            ):
+                return
+            router_ready = True
+        portal_validate(config)
+        try:
+            return portal_run(config)
+        except PortalInterfaceUnavailable as error:
+            # This exception is raised before any network mutation. Do not retry
+            # firewall, activation, or cleanup failures as interface discovery.
+            print(f"  Skipping {safe_text(config['lan'])}: {safe_text(error)}")
+            if mode == "router":
+                router_ready = False  # A different physical port needs its own cable.
+    raise RuntimeError("No usable network interface is available for the captive portal.")
 
 
 def load_profile(path=None):
@@ -3806,7 +3824,7 @@ def load_profile(path=None):
     if not isinstance(profile, dict) or any(
         not isinstance(profile.get(k, ""), str) for k in PROFILE_FIELDS
     ):
-        raise ValueError("El perfil debe ser un objeto JSON con campos de texto: " + str(path))
+        raise ValueError("The profile must be a JSON object with text fields: " + str(path))
     return {key: profile.get(key, "") for key in PROFILE_FIELDS}
 
 
@@ -3815,11 +3833,11 @@ def who_am_i():
         profile = load_profile()
         print(tint("\nPOLTERHEIST :: WHO AM I?"))
         for key, label in PROFILE_FIELDS.items():
-            print(f"  {label}: {safe_text(profile[key]) or '[sin configurar]'}")
-        choice = input("  [e] Editar perfil | [q/INTRO] Volver: ").strip().lower()
+            print(f"  {label}: {safe_text(profile[key]) or '[not configured]'}")
+        choice = input("  [e] Edit profile | [q/ENTER] Back: ").strip().lower()
         if choice != "e":
             return
-        print("  INTRO mantiene el valor; un guion (-) lo borra.")
+        print("  ENTER keeps the value; a hyphen (-) clears it.")
         updated = dict(profile)
         for key, label in PROFILE_FIELDS.items():
             value = input(f"  {label}: ").strip()
@@ -3830,40 +3848,40 @@ def who_am_i():
 
 def main(argv=None):
     parser = argparse.ArgumentParser(
-        description="POLTERHEIST: reconocimiento LAN y Wi-Fi autorizado"
+        description="POLTERHEIST: authorized LAN and Wi-Fi reconnaissance"
     )
     parser.add_argument("--version", action="version", version="POLTERHEIST " + VERSION)
-    parser.add_argument("--check", action="store_true", help="Diagnóstico local; no escanea la red")
+    parser.add_argument(
+        "--check", action="store_true", help="Local diagnostics; does not scan the network"
+    )
     parser.add_argument(
         "--setup",
         action="store_true",
-        help="Instalar dependencias y crear el entorno Python según el sistema operativo",
+        help="Install dependencies and create a Python environment for this operating system",
     )
     parser.add_argument(
-        "--ssid", help="SSID autorizado para evaluar; por defecto, la red conectada"
+        "--ssid", help="Authorized SSID to assess; defaults to the connected network"
     )
-    parser.add_argument("--bssid", help="Limitar la evaluación a un BSSID del SSID autorizado")
+    parser.add_argument("--bssid", help="Limit assessment to one BSSID of the authorized SSID")
     parser.add_argument(
         "--wireless",
         "--wpscan",
         "--fingerprint",
         action="store_true",
-        help="Abrir directamente el descubrimiento Wi-Fi y la evaluación WPS",
+        help="Open Wi-Fi discovery and WPS assessment directly",
     )
     parser.add_argument("--windows-elevated", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument(
         "--portal-check",
         action="store_true",
-        help="Diagnóstico del portal y de las interfaces, sin modificar la red",
+        help="Portal and interface diagnostics without changing the network",
     )
     parser.add_argument("--portal-choice", choices=("1", "2"), help=argparse.SUPPRESS)
-    parser.add_argument(
-        "--portal", action="store_true", help="Abrir el asistente de portal cautivo"
-    )
+    parser.add_argument("--portal", action="store_true", help="Open the captive portal wizard")
     parser.add_argument(
         "--portal-preview",
         action="store_true",
-        help="Ver el portal en localhost, sin modificar la red",
+        help="Preview the portal on localhost without changing the network",
     )
     options = parser.parse_args(argv)
     if options.portal_choice:
@@ -3871,7 +3889,7 @@ def main(argv=None):
     if (options.portal or options.portal_preview) and (
         options.wireless or options.ssid or options.bssid
     ):
-        parser.error("El portal y el fingerprint deben ejecutarse por separado.")
+        parser.error("Run the portal and fingerprinting separately.")
     if options.setup:
         try:
             return setup_environment()
@@ -3896,19 +3914,19 @@ def main(argv=None):
             + operating_system()["name"]
         )
         if sys.platform == "win32":
-            print("  Descubrimiento Wi-Fi/WPS: API nativa de Windows (sin WSL/Nmap)")
+            print("  Wi-Fi/WPS discovery: native Windows API (no WSL/Nmap)")
             print(
                 "  Npcap / WlanHelper: "
-                + (wlan_helper_path() or "no instalado; necesario para fingerprint activo")
+                + (wlan_helper_path() or "not installed; required for active fingerprinting")
             )
             try:
                 for iface in detect_windows_interfaces():
                     print(
-                        f"  {safe_text(iface['display_name'])} | GUID={iface['guid']} | modo={iface['mode']} | modos disponibles={', '.join(iface['capabilities']) or 'desconocidos'}"
+                        f"  {safe_text(iface['display_name'])} | GUID={iface['guid']} | mode={iface['mode']} | available modes={', '.join(iface['capabilities']) or 'unknown'}"
                     )
                     if iface["capabilities"] and "monitor" not in iface["capabilities"]:
                         print(
-                            "    El controlador Windows actual no anuncia modo monitor; fingerprint activo no disponible."
+                            "    The current Windows driver does not advertise monitor mode; active fingerprinting is unavailable."
                         )
                     if iface.get("monitor_note"):
                         print("    " + safe_text(iface["monitor_note"]))
@@ -3916,10 +3934,10 @@ def main(argv=None):
                 print("  Wi-Fi: " + safe_text(error))
         else:
             for binary in ("nmap", "arp-scan", "ip", "iw", "nmcli", "tcpdump"):
-                print(f"  {binary}: {shutil.which(binary) or 'no encontrado'}")
+                print(f"  {binary}: {shutil.which(binary) or 'not found'}")
         try:
             load_upstream()
-            print("  Detector upstream: hash verificado, Scapy disponible")
+            print("  Upstream detector: hash verified, Scapy available")
         except (OSError, ValueError, RuntimeError) as error:
             print("  Detector: " + str(error))
         return 0
@@ -3940,7 +3958,7 @@ def main(argv=None):
     if options.wireless:
         try:
             if options.windows_elevated and not windows_is_admin():
-                raise RuntimeError("El proceso no recibió permisos de administrador.")
+                raise RuntimeError("The process did not receive administrator privileges.")
             if options.ssid is not None or options.bssid is not None:
                 return wireless_recon(ssid=options.ssid, bssid=options.bssid) or 0
             return wireless_recon() or 0
@@ -3952,7 +3970,7 @@ def main(argv=None):
         finally:
             if options.windows_elevated:
                 try:
-                    input("  INTRO para cerrar esta ventana: ")
+                    input("  Press ENTER to close this window: ")
                 except (KeyboardInterrupt, EOFError):
                     pass
     while True:
@@ -3964,7 +3982,7 @@ def main(argv=None):
         try:
             choice = input("  > ").strip().lower()
         except (KeyboardInterrupt, EOFError):
-            print("\n  Hasta pronto.")
+            print("\n  Goodbye.")
             return 0
         if choice == "q":
             return 0
@@ -3972,12 +3990,12 @@ def main(argv=None):
             choice
         )
         if action is None:
-            print("  Opción no válida.")
+            print("  Invalid option.")
             continue
         try:
             action()
         except (KeyboardInterrupt, EOFError):
-            print("\n  Volviendo al menú.")
+            print("\n  Returning to the menu.")
         except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as error:
             print(tint("  [!] " + safe_text(error), AMBER))
 

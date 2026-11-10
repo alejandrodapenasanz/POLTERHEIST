@@ -169,7 +169,7 @@ class WindowsTests(unittest.TestCase):
         discover.assert_called_once()
 
     def test_windows_error_guidance(self):
-        self.assertIn("Ubicación", str(app.windows_wlan_error(5, "WlanScan")))
+        self.assertIn("Location", str(app.windows_wlan_error(5, "WlanScan")))
         self.assertIn("WlanSvc", str(app.windows_wlan_error(1062, "WlanOpenHandle")))
 
     def test_helper_missing_has_actionable_error(self):
@@ -217,7 +217,7 @@ class WindowsTests(unittest.TestCase):
         ):
             interfaces = app.detect_windows_interfaces()
         self.assertEqual(interfaces[0]["mode"], "managed")
-        self.assertIn("nativo", interfaces[0]["monitor_note"])
+        self.assertIn("native", interfaces[0]["monitor_note"])
 
     def test_npcap_monitor_is_detected_read_only(self):
         wlan = Mock()
@@ -319,11 +319,11 @@ class WindowsTests(unittest.TestCase):
             patch.object(app.sys, "platform", "win32"),
             patch.object(ctypes, "windll", windll, create=True),
         ):
-            with self.assertRaisesRegex(RuntimeError, "administrador"):
+            with self.assertRaisesRegex(RuntimeError, "administrator"):
                 app.require_windows_monitor(ap, iface)
             windll.shell32.IsUserAnAdmin.return_value = 1
             with patch.object(app, "wlan_helper", side_effect=["managed", "6"]):
-                with self.assertRaisesRegex(RuntimeError, "preparación automática"):
+                with self.assertRaisesRegex(RuntimeError, "automatic setup"):
                     app.require_windows_monitor(ap, iface)
 
     def test_windows_fingerprint_uses_unmodified_decisions_and_evidence(self):
@@ -436,14 +436,14 @@ class NativeApiTests(unittest.TestCase):
     def test_notification_failure_and_timeout_identify_cache(self):
         for notification in (8, None):
             with self.client(notification=notification) as (wlan, dll):
-                self.assertIn("caché", wlan.scan(GUID, timeout=0))
+                self.assertIn("cache", wlan.scan(GUID, timeout=0))
                 self.assertEqual(dll.WlanRegisterNotification.call_args.args[1], 0)
 
     def test_access_denied_unregisters_and_no_bss_read(self):
         with self.client() as (wlan, dll):
             dll.WlanScan.side_effect = None
             dll.WlanScan.return_value = 5
-            with self.assertRaisesRegex(RuntimeError, "Ubicación"):
+            with self.assertRaisesRegex(RuntimeError, "Location"):
                 wlan.scan(GUID)
             self.assertEqual(dll.WlanRegisterNotification.call_args.args[1], 0)
             dll.WlanGetNetworkBssList.assert_not_called()
@@ -486,7 +486,7 @@ class NativeApiTests(unittest.TestCase):
             self.assertEqual(parameters.profile, "Lab")
             self.assertIsNone(parameters.ssid)
             self.assertIsNone(parameters.bssids)
-            with self.assertRaisesRegex(RuntimeError, "no ha confirmado"):
+            with self.assertRaisesRegex(RuntimeError, "did not confirm"):
                 wlan.connect_profile(GUID, "Lab", timeout=0)
 
     def test_connected_ssid_is_not_confused_with_profile_name(self):

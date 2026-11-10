@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Entrada compatible: toda la aplicacion esta en script.py."""
+"""Compatibility entry point: the entire application is in script.py."""
 
 import sys
 

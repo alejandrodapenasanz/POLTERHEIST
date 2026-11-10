@@ -27,7 +27,143 @@ TABLE = "polterheist_123456abcdef"
 MAC = "02:00:00:00:00:02"
 
 
+def radio(name, phy):
+    return {
+        "name": name,
+        "phy": phy,
+        "mode": "managed",
+        "capabilities": ["managed", "AP"],
+        "frequencies": [
+            {"channel": 6, "frequency_mhz": 2437, "disabled": False, "no_ir": False, "radar": False}
+        ],
+    }
+
+
+@contextlib.contextmanager
+def wizard_environment(names, radios, answers=()):
+    links = [{"ifname": name, "link_type": "ether"} for name in ["eth0", *names]]
+    routes = [{"dst": "default", "dev": "eth0"}]
+    output = io.StringIO()
+    with (
+        patch.object(app, "require_linux"),
+        patch.object(app, "require_tools"),
+        patch.object(app.os, "geteuid", return_value=0, create=True),
+        patch.object(app.shutil, "which", return_value="/bin/tool"),
+        patch.object(app, "linux_command", side_effect=[json.dumps(routes), json.dumps(links)]),
+        patch.object(app, "detect_wireless_interfaces", return_value=radios),
+        patch.object(app, "linux_nm_state", return_value=(True, None)),
+        patch.object(app.getpass, "getpass", return_value="test-only-pass"),
+        patch("builtins.input", side_effect=answers) as prompt,
+        patch.object(app, "portal_run", return_value=0) as run,
+        contextlib.redirect_stdout(output),
+    ):
+        yield run, output, prompt
+
+
 class PortalTests(unittest.TestCase):
+    def test_plans_skip_busy_unsupported_shared_and_restricted_radios(self):
+        radios = [radio(f"wlan{n}", f"phy{n}") for n in range(7)]
+        radios[1]["frequencies"][0]["no_ir"] = True
+        radios[2]["phy"] = radios[3]["phy"]
+        radios[4]["capabilities"] = ["managed"]
+        radios[6]["connected"] = True
+        links = [{"ifname": r["name"], "link_type": "ether"} for r in radios]
+        links += [{"ifname": n, "link_type": "ether"} for n in ["eth0", "eth1"]]
+
+        def nm(name):
+            return True, "busy-connection" if name == "wlan0" else None
+
+        with (
+            patch.object(app, "linux_nm_state", side_effect=nm),
+            contextlib.redirect_stdout(io.StringIO()),
+        ):
+            plans = app.portal_interface_plans(links, radios, "eth0", "wifi", "10.77.0.0/24")
+        self.assertEqual(
+            [(p["lan"], p["mode"]) for p in plans], [("wlan5", "wifi"), ("eth1", "router")]
+        )
+        self.assertEqual(plans[0]["channel"], 6)
+
+    def test_wizard_falls_back_in_both_directions(self):
+        cases = [
+            ("1", ["eth1"], [], ["AP"], "router", "eth1"),
+            ("2", ["wlan1"], [radio("wlan1", "phy1")], ["My network"], "wifi", "wlan1"),
+        ]
+        for choice, names, radios, answers, mode, interface in cases:
+            with (
+                self.subTest(choice=choice),
+                wizard_environment(names, radios, answers) as (run, output, _),
+            ):
+                self.assertEqual(app.captive_portal(choice), 0)
+                run.assert_called_once()
+                config = run.call_args.args[0]
+                self.assertEqual((config["mode"], config["lan"]), (mode, interface))
+                self.assertIn("No usable interface remains in the selected mode", output.getvalue())
+                self.assertEqual(config["wan"], "eth0")
+
+    def test_wizard_tries_next_interface_if_final_checks_fail(self):
+        for choice, names, radios, answers in [
+            ("2", ["eth1", "eth2"], [], ["AP", "AP"]),
+            (
+                "1",
+                ["wlan1", "wlan2"],
+                [radio("wlan1", "phy1"), radio("wlan2", "phy2")],
+                ["My network"],
+            ),
+        ]:
+            with (
+                self.subTest(choice=choice),
+                wizard_environment(names, radios, answers) as (run, _, prompt),
+            ):
+                run.side_effect = [app.PortalInterfaceUnavailable("Interface disappeared"), 0]
+                self.assertEqual(app.captive_portal(choice), 0)
+                self.assertEqual([c.args[0]["lan"] for c in run.call_args_list], names)
+                self.assertEqual(prompt.call_count, len(answers))
+
+    def test_all_candidates_exhausted_report_no_usable_interface(self):
+        with wizard_environment(["eth1", "eth2"], [], ["AP", "AP"]) as (run, _, _):
+            run.side_effect = app.PortalInterfaceUnavailable("Interface disappeared")
+            with self.assertRaisesRegex(
+                RuntimeError, "^No usable network interface is available for the captive portal\\.$"
+            ):
+                app.captive_portal("2")
+            self.assertEqual(run.call_count, 2)
+
+    def test_main_prints_one_clear_error_when_no_interface_can_be_used(self):
+        for choice in ("1", "2"):
+            with self.subTest(choice=choice), wizard_environment([], []) as (run, output, prompt):
+                self.assertEqual(app.main(["--portal-choice", choice]), 1)
+                errors = [line.strip() for line in output.getvalue().splitlines() if "[!]" in line]
+                self.assertEqual(
+                    errors, ["[!] No usable network interface is available for the captive portal."]
+                )
+                self.assertNotIn("PORTAL / INTERFACES", output.getvalue())
+                run.assert_not_called()
+                prompt.assert_not_called()
+
+    def test_firewall_errors_and_cancellation_do_not_trigger_retry(self):
+        with wizard_environment(["eth1", "eth2"], [], ["AP"]) as (run, _, _):
+            run.side_effect = RuntimeError("Firewall conflict")
+            with self.assertRaisesRegex(RuntimeError, "Firewall conflict"):
+                app.captive_portal("2")
+            run.assert_called_once()
+        with wizard_environment(["eth1", "eth2"], [], [""]) as (run, _, prompt):
+            self.assertIsNone(app.captive_portal("2"))
+            run.assert_not_called()
+            prompt.assert_called_once()
+
+    def test_missing_iw_can_fall_back_to_ethernet(self):
+        with wizard_environment(["eth1"], [], ["AP"]) as (run, _, _):
+            with patch.object(app.shutil, "which", return_value=None):
+                self.assertEqual(app.captive_portal("1"), 0)
+            self.assertEqual(run.call_args.args[0]["mode"], "router")
+
+    def test_unknown_wifi_radio_is_not_reused_as_ethernet(self):
+        with wizard_environment(["wlan1"], [], []) as (run, _, _):
+            with patch.object(app.Path, "exists", return_value=True):
+                with self.assertRaisesRegex(RuntimeError, "No usable network interface"):
+                    app.captive_portal("2")
+            run.assert_not_called()
+
     def test_vm_ethernet_and_docker_do_not_become_wireless_candidates(self):
         links = [
             {"ifname": "lo", "link_type": "loopback"},
@@ -41,8 +177,8 @@ class PortalTests(unittest.TestCase):
         with contextlib.redirect_stdout(output):
             app.portal_explain_interfaces(links, [], "eth0", "wifi", "oracle")
         self.assertIn("VirtualBox", output.getvalue())
-        self.assertIn("ninguna antena Wi-Fi", output.getvalue())
-        self.assertIn("sigue siendo Ethernet virtual", output.getvalue())
+        self.assertIn("no Wi-Fi radio", output.getvalue())
+        self.assertIn("still virtual Ethernet", output.getvalue())
         self.assertIn("Kali Live", output.getvalue())
 
     def test_free_radio_and_free_ethernet_are_distinct_candidates(self):
@@ -80,7 +216,7 @@ class PortalTests(unittest.TestCase):
             contextlib.redirect_stdout(output),
         ):
             self.assertEqual(app.portal_check(), 0)
-        self.assertIn("Otro firewall/pasarela", output.getvalue())
+        self.assertIn("Another firewall/gateway", output.getvalue())
         self.assertTrue(
             all(c.args[0][0] == "ip" and "show" in c.args[0] for c in commands.call_args_list)
         )
@@ -90,8 +226,8 @@ class PortalTests(unittest.TestCase):
         output = io.StringIO()
         with contextlib.redirect_stdout(output):
             app.portal_explain_interfaces([], None, None, "wifi")
-        self.assertNotIn("ninguna antena", output.getvalue())
-        self.assertIn("No se pudo comprobar", output.getvalue())
+        self.assertNotIn("no Wi-Fi radio", output.getvalue())
+        self.assertIn("Unable to check", output.getvalue())
 
     def test_elevation_keeps_selected_portal_mode(self):
         with (
@@ -165,6 +301,8 @@ class PortalTests(unittest.TestCase):
 
     def test_page_escapes_ssid_and_preview_cannot_accept(self):
         page = app.portal_page('<script>alert("x")</script>', preview=True)
+        self.assertIn('lang="en"', page)
+        self.assertIn("Accept and connect", page)
         self.assertNotIn("<script>", page)
         self.assertIn("&lt;script&gt;", page)
         self.assertNotIn("<form", page)

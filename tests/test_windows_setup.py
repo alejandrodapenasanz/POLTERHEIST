@@ -105,7 +105,7 @@ class WindowsSetupTests(unittest.TestCase):
 
     def test_unsupported_driver_never_changes_radio(self):
         with self.radio(modes="managed") as (_, wlan, calls):
-            with self.assertRaisesRegex(RuntimeError, "monitor no disponible"):
+            with self.assertRaisesRegex(RuntimeError, "monitor mode unavailable"):
                 with app.prepared_windows_monitor(self.ap, self.iface, self.folder, {}):
                     self.fail("unsupported radio must not be used")
         self.assertTrue(all(len(c.args) == 2 for c in calls.call_args_list))
@@ -139,7 +139,7 @@ class WindowsSetupTests(unittest.TestCase):
         self.assertEqual(output.getvalue().count("WIRELESS RESULTS"), 1)
         self.assertNotIn("[1] " + self.ap["bssid"], output.getvalue())
         self.assertNotIn("Prepara manualmente", output.getvalue())
-        self.assertIn("modos disponibles = managed", output.getvalue())
+        self.assertIn("available modes = managed", output.getvalue())
 
     def test_candidate_prefers_disconnected_capable_adapter(self):
         spare = dict(self.iface, name="spare", connected=False)
@@ -173,7 +173,7 @@ class WindowsSetupTests(unittest.TestCase):
                 patch.object(app, "fingerprint_selected", return_value=outcome) as probe,
                 patch(
                     "builtins.input",
-                    side_effect=["1", "AUTORIZO " + ap["bssid"] if authorized else ""],
+                    side_effect=["1", "AUTHORIZE " + ap["bssid"] if authorized else ""],
                 ),
                 contextlib.redirect_stdout(io.StringIO()),
             ):
@@ -250,7 +250,7 @@ class WindowsElevationTests(unittest.TestCase):
             patch.object(ctypes, "WinDLL", side_effect=[shell, kernel], create=True),
             contextlib.redirect_stdout(io.StringIO()),
         ):
-            with self.assertRaisesRegex(RuntimeError, "elevación UAC"):
+            with self.assertRaisesRegex(RuntimeError, "UAC elevation"):
                 app.windows_elevated_wireless()
         kernel.WaitForSingleObject.assert_not_called()
         kernel.CloseHandle.assert_not_called()

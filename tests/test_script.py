@@ -228,8 +228,8 @@ class LanTests(QuietTest):
         with patch.object(app, "run_progress", return_value=completed()):
             identified = app.identify(host(1, vendor="Apple"), self.folder)
         self.assertFalse(identified["mobile"])
-        self.assertEqual(identified["type_confidence"], "Baja")
-        self.assertEqual(identified["vendor_confidence"], "Media")
+        self.assertEqual(identified["type_confidence"], "Low")
+        self.assertEqual(identified["vendor_confidence"], "Medium")
 
     def test_cisco_ios_does_not_imply_apple_ios(self):
         target = host(1)
@@ -239,7 +239,7 @@ class LanTests(QuietTest):
         with patch.object(app, "run_progress", return_value=completed()):
             identified = app.identify(target, self.folder)
         self.assertFalse(identified["mobile"])
-        self.assertNotEqual(identified["os"], "iOS (estimado)")
+        self.assertNotEqual(identified["os"], "iOS (estimated)")
 
     def test_high_confidence_android_classification(self):
         target = host(1)
@@ -295,7 +295,7 @@ class LanTests(QuietTest):
             patch.object(app, "show_ids"),
             patch.object(app, "choose", return_value=[h]),
             patch.object(app, "scan_one", side_effect=KeyboardInterrupt),
-            patch("builtins.input", side_effect=["1", "s", ""]),
+            patch("builtins.input", side_effect=["1", "y", ""]),
         ):
             app.lan_recon()
         report = json.loads((self.folder / "report.json").read_text())
@@ -349,7 +349,7 @@ class WirelessParsingTests(QuietTest):
     def test_shared_radio_rejected_even_if_sibling_disconnected(self):
         monitor = app.parse_iw_interfaces(IW_DEV)[1]
         sibling = dict(monitor, name="wlan1", mode="managed", connected=False)
-        with self.assertRaisesRegex(RuntimeError, "compartida"):
+        with self.assertRaisesRegex(RuntimeError, "shared"):
             app.require_isolated_monitor(monitor, [monitor, sibling])
 
     def test_distinct_bssids_same_ssid_and_real_units(self):
@@ -425,8 +425,8 @@ class WirelessParsingTests(QuietTest):
         for answer, expected in [
             ("", False),
             ("yes", False),
-            ("AUTORIZO 02:00:00:00:00:02", False),
-            ("AUTORIZO " + ap["bssid"], True),
+            ("AUTHORIZE 02:00:00:00:00:02", False),
+            ("AUTHORIZE " + ap["bssid"], True),
         ]:
             with patch("builtins.input", return_value=answer):
                 self.assertEqual(app.authorize_target(ap), expected)
@@ -496,7 +496,7 @@ class UpstreamIntegrationTests(QuietTest):
             patch.object(self.up, "AsyncSniffer", side_effect=build_sniffer),
             patch.object(self.up, "parse_advertisement", return_value=other),
         ):
-            with self.assertRaisesRegex(RuntimeError, "no se ha observado"):
+            with self.assertRaisesRegex(RuntimeError, "was not observed"):
                 app.observe_selected(self.up, iface, ap, writer, seconds=0)
         writer.write.assert_not_called()
 
@@ -564,7 +564,7 @@ class UpstreamIntegrationTests(QuietTest):
                     patch.object(app, "report_folder", return_value=folder),
                     patch.object(app, "discover_wifi", return_value=aps),
                     patch.object(app, "fingerprint_selected", return_value=outcome) as fingerprint,
-                    patch("builtins.input", side_effect=["2", "AUTORIZO " + aps[1]["bssid"]]),
+                    patch("builtins.input", side_effect=["2", "AUTHORIZE " + aps[1]["bssid"]]),
                     contextlib.redirect_stdout(output),
                 ):
                     app.wireless_recon(bssid=aps[1]["bssid"])

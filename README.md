@@ -1,6 +1,6 @@
 # POLTERHEIST
 
-Herramienta de inventario y evaluación de redes propias o autorizadas: **LAN en Kali Linux, Wi-Fi/WPS en Linux y Windows y portal cautivo en Kali/Linux**, con interfaz de terminal verde y arte ASCII:
+Inventory and assessment for networks you own or are authorized to test: **LAN reconnaissance on Kali/Linux, Wi-Fi/WPS on Linux and Windows, and a captive portal on Kali/Linux**. Menus, diagnostics, report explanations, and the portal page are in English.
 
 ```text
 [0] WHO AM I?
@@ -11,11 +11,11 @@ Herramienta de inventario y evaluación de redes propias o autorizadas: **LAN en
 [q] EXIT
 ```
 
-La aplicación está en **`script.py`**, organizada por funciones. Se ha evolucionado el código LAN existente; `POLTERHEIST.py` sigue funcionando como entrada compatible. El detector externo permanece separado en `vendor/` para conservar su código original, licencia y procedencia.
+The application lives in **`script.py`**, organized into functions. `POLTERHEIST.py` is a compatibility entry point. The external detector remains in `vendor/` to preserve its original code, license, and provenance.
 
-## Instalación en Kali
+## Kali installation
 
-Arranca Kali (por ejemplo, Kali Live desde USB), **conéctate a tu Wi-Fi** y abre el repositorio. Se necesita Python **3.11 o posterior**:
+Boot Kali, connect to your Wi-Fi, and open the repository. Python **3.11 or newer** is required.
 
 ```bash
 git clone https://github.com/alejandrodapenasanz/POLTERHEIST.git
@@ -25,26 +25,24 @@ python3 script.py --setup
 .venv/bin/python script.py --wireless
 ```
 
-`script.py` detecta Windows o Linux y lee `/etc/os-release` para identificar Kali. `--setup` instala las herramientas con APT, añade `firmware-mediatek` en Kali y crea un entorno virtual con Scapy 2.7.0, sin modificar el Python del sistema. Si copiaste una `.venv` de Windows a Linux, conserva esa carpeta y crea `.venv-linux`; utiliza la ruta que imprime al terminar. La instalación necesita Internet. Si Kali no reconoce la tarjeta después de actualizar su firmware, puede ser necesario reiniciar.
+The script detects Windows/Linux and reads `/etc/os-release` to identify Kali. Setup installs Linux tools with APT, includes `firmware-mediatek` on Kali, and creates a virtual environment with Scapy 2.7.0 without changing system Python. An environment copied from the other OS is preserved; setup uses `.venv-linux` or `.venv-windows` instead and prints the executable path. Installation needs Internet access. Firmware updates may require a reboot.
 
-El flujo inalámbrico solicita `sudo` automáticamente cuando lo necesita, conservando el intérprete del entorno virtual. Obtiene el **SSID conectado**, descubre sus BSSID, ejecuta el fingerprint original y **después muestra una sola tabla `WIRELESS RESULTS`**, con `ASSESSMENT` en la columna derecha. Las otras redes observadas quedan en `NOT_TESTED`. No hay selección posterior de ID ni listado duplicado de BSSID.
+Wireless assessment requests `sudo` automatically when needed, preserving the virtual environment interpreter. It uses the **connected SSID**, discovers its BSSIDs, runs the original fingerprint detector, and displays **one `WIRELESS RESULTS` table** with `ASSESSMENT` on the right. Other observed networks remain `NOT_TESTED`.
 
-La preparación de la radio y su restauración son automáticas. Si utiliza el adaptador de tu conexión, esta se pausará durante cada prueba. Se prioriza otra radio compatible desconectada cuando existe. Menú y perfil pueden abrirse con `.venv/bin/python script.py`; LAN requiere root.
+Radio setup and restoration are automatic. Using the connected adapter temporarily interrupts that connection; a compatible disconnected radio is preferred when available. Open the menu with `.venv/bin/python script.py`; LAN reconnaissance requires root.
 
-Para indicar otra red propia/autorizada o limitar el análisis a un BSSID:
+To specify another authorized network or restrict assessment to one BSSID:
 
 ```bash
-.venv/bin/python script.py --wireless --ssid 'Mi Wi-Fi'
-.venv/bin/python script.py --wireless --ssid 'Mi Wi-Fi' --bssid aa:bb:cc:dd:ee:ff
+.venv/bin/python script.py --wireless --ssid 'My Wi-Fi'
+.venv/bin/python script.py --wireless --ssid 'My Wi-Fi' --bssid aa:bb:cc:dd:ee:ff
 ```
 
-Sin conexión ni `--ssid`, se muestra el descubrimiento sin ejecutar pruebas activas. Un SSID compartido por varios BSSID obtiene un resultado independiente para cada uno; no se propaga un positivo entre radios.
+Without a connected network or `--ssid`, discovery runs without active fingerprinting. Each BSSID receives its own result; assessments are not copied between radios sharing an SSID.
 
-El flujo LAN requiere Linux. El descubrimiento Wi-Fi y WPS dispone de un backend nativo de Windows; no necesita `iw`, WSL, Nmap ni `arp-scan`.
+## Wi-Fi and WPS on Windows
 
-## Wi-Fi y WPS en Windows
-
-Desde PowerShell, con Python 3.11 o posterior:
+From PowerShell with Python 3.11 or newer:
 
 ```powershell
 py -m venv .venv
@@ -53,157 +51,153 @@ py -m venv .venv
 .\.venv\Scripts\python.exe script.py --wpscan
 ```
 
-`--wpscan`, `--wireless` y `--fingerprint` ejecutan el flujo automático sobre el SSID conectado; también puedes usar `[2]` en el menú. `--ssid` permite indicar explícitamente el alcance autorizado. Aquí `wpscan` se refiere a WPS de Wi-Fi.
+`--wpscan`, `--wireless`, `--fingerprint`, and menu option **2** run the automatic workflow for the connected SSID. `--ssid` specifies another authorized scope; `--bssid` restricts it to one radio. Here, `wpscan` means Wi-Fi WPS, not the WordPress scanner. Native discovery requires no WSL, `iw`, Nmap, or `arp-scan`.
 
-### Comprobar vulnerabilidad con el fingerprint
+### Assessments
 
-```powershell
-.\.venv\Scripts\python.exe script.py --fingerprint
-```
+The final table retains the exact assessment labels from [`qkaiser/broadcom-wps`](https://github.com/qkaiser/broadcom-wps#assessments):
 
-La aplicación utiliza la red conectada como alcance autorizado por defecto, prepara una radio compatible y evalúa secuencialmente sus BSSID observados. `--bssid` permite limitarla a una radio concreta. La ausencia de respuesta o la falta de soporte del controlador no se convierten en un resultado negativo.
-
-Se muestra **una sola tabla al terminar las evaluaciones**, también al redirigir la salida a un archivo. Cada fila conserva literalmente el resultado de `broadcom_fingerprint.py` de [`qkaiser/broadcom-wps`](https://github.com/qkaiser/broadcom-wps#assessments):
-
-| ASSESSMENT | Significado |
+| ASSESSMENT | Meaning |
 | --- | --- |
-| `LIKELY_VULNERABLE` | Rechazo compatible con Broadcom WPS Monitor: probablemente vulnerable. |
-| `PATCHED_HOSTAPD` | ACK compatible con hostapd y evidencia Broadcom en el anuncio: equipo Broadcom con hostapd. |
-| `NO_BROADCOM_FINGERPRINT` | ACK compatible con hostapd sin evidencia Broadcom en el anuncio. |
-| `INCONCLUSIVE` | El detector no obtuvo una respuesta clasificable; consulta su advertencia. |
-| `NOT_TESTED` | Estado de POLTERHEIST: la prueba no se ejecutó; se muestra el motivo. |
-| `ERROR` | Estado de POLTERHEIST: fallo de ejecución o evidencia que no corresponde al objetivo. |
+| `LIKELY_VULNERABLE` | Rejection consistent with Broadcom WPS Monitor; likely vulnerable. |
+| `PATCHED_HOSTAPD` | hostapd-style ACK and Broadcom evidence in the advertisement; a Broadcom device using hostapd. |
+| `NO_BROADCOM_FINGERPRINT` | hostapd-style ACK without Broadcom evidence in the advertisement. |
+| `INCONCLUSIVE` | No classifiable response; inspect the detector warning. Unknown upstream results also map here. |
+| `NOT_TESTED` | POLTERHEIST status: the test did not start or the network is outside scope. The reason is reported. |
+| `ERROR` | POLTERHEIST status: execution failed or evidence did not match the target. |
 
-Las redes fuera del alcance o cuya prueba no pudo iniciarse siguen en `NOT_TESTED`. Los resultados `PATCHED_HOSTAPD` y `NO_BROADCOM_FINGERPRINT` se mantienen separados en pantalla y en los informes. Solo `LIKELY_VULNERABLE` es un hallazgo positivo; no confirma explotación ni RCE. `INCONCLUSIVE` no significa que el equipo sea seguro.
+Only `LIKELY_VULNERABLE` is a positive finding, and it **does not confirm exploitation or RCE**. Missing responses, missing WPS advertisements, and unsupported drivers are not evidence that a network is safe. Negative assessments concern this detector, not overall device security.
 
-El detalle —explicación, implementación estimada, respuestas, estado y advertencias— se guarda en `reports/wireless/<scan_id>/targets/<BSSID_sin_dos_puntos>/fingerprint.json`. El `report.json` general contiene todos los resultados y sus rutas. Para un único objetivo también se conserva `fingerprint.json` en la carpeta principal. Los archivos originales `upstream_result.json` y PCAP se conservan por BSSID. Un positivo o negativo requiere una salida original correspondiente al SSID/BSSID; el fabricante, la presencia de WPS o la seguridad WPA no bastan.
+Explanations, implementation estimates, responses, health, and warnings are saved to `reports/wireless/<scan_id>/targets/<BSSID_without_colons>/fingerprint.json`. The scan's `report.json` includes all results and paths. A single target also gets a top-level `fingerprint.json`. Original `upstream_result.json` and PCAP files are preserved per BSSID. Vendor, WPS presence, or WPA settings alone cannot support a vulnerability conclusion; matching upstream SSID/BSSID evidence is required.
 
-Si falta Npcap en Windows, aparece `NOT_TESTED` con el motivo. Añadir el comando no sustituye los requisitos de captura/inyección que se detallan a continuación.
+### Native discovery and active fingerprinting
 
-El listado utiliza la **API Native Wi-Fi de Windows** (`wlanapi.dll`). Obtiene BSSID, SSID, frecuencia/canal, RSSI en dBm, calidad y elementos de información WPS/RSN/WPA proporcionados por el controlador. No depende del idioma de `netsh`. WPS solo aparece como `Detected` si existe un anuncio WPS; descubrirlo no significa que el AP sea vulnerable. Se conservan también los bytes originales del listado BSS y los IE.
+Discovery uses **Windows Native Wi-Fi** (`wlanapi.dll`) for BSSID, SSID, frequency/channel, RSSI, quality, and WPS/RSN/WPA information elements. It does not parse localized `netsh` output. Original BSS bytes and information elements are preserved. Discovery works on a normal connected adapter, requests a standard Windows refresh, and waits for completion. Windows may send discovery probes or return cached data; cache limitations are reported. Discovery does not change mode or disconnect the adapter.
 
-Este descubrimiento funciona con una interfaz Wi-Fi normal, incluso conectada. Solicita una actualización ordinaria a Windows, que puede emitir sondas de descubrimiento, y espera la notificación de finalización. Si Windows no la confirma, el informe indica que los datos pueden proceder de caché. No cambia el modo de la tarjeta ni desconecta la conexión.
+For **error 5 / access denied**, enable **Location** in Settings > Privacy & security > Location for the application/terminal. For **error 1062**, check **WLAN AutoConfig (`WlanSvc`)**. [Microsoft documentation](https://learn.microsoft.com/en-us/windows/win32/nativewifi/wi-fi-access-location-changes).
 
-Si aparece **error 5 / acceso denegado**, permite el acceso a **Ubicación** en Configuración → Privacidad y seguridad → Ubicación para la aplicación/terminal. Windows protege con ese permiso la lectura de BSSID. Si aparece **error 1062**, revisa el servicio **Configuración automática de WLAN (`WlanSvc`)**. [Documentación de Microsoft](https://learn.microsoft.com/en-us/windows/win32/nativewifi/wi-fi-access-location-changes).
+Active fingerprinting additionally requires [Npcap](https://npcap.com/#download) with **Support raw 802.11 traffic (and monitor mode) for wireless adapters**, administrator privileges, and a driver/adapter supporting monitor capture and 802.11 injection. Npcap is not bundled or automatically installed. Listing networks does not demonstrate injection support. With a compatible adapter, POLTERHEIST requests normal UAC elevation; Windows requires the user to accept the dialog.
 
-### Prueba WPS activa con Npcap
+The Windows transport supports **active testing on 2.4 GHz**. Use Linux for active 5 GHz testing; the detector does not support 6 GHz. Npcap must deliver Radiotap/802.11 frames, and the exact target must be observed on its frequency before transmission. Reception/injection failures are not treated as negative findings.
 
-Para ejecutar el detector, además del listado, necesitas:
+Setup saves the original mode and connection profile name, enables monitor mode, sets the channel, and verifies it. Completion, errors, and Ctrl+C trigger restoration and reconnection to the original profile, checked against Windows' confirmation. An adapter originally in monitor mode returns to its original frequency. Passwords are not read. `radio_setup.json` records restoration errors, which are also displayed. Forced termination can prevent cleanup.
 
-- [Npcap](https://npcap.com/#download) instalado con la opción **Support raw 802.11 traffic (and monitor mode) for wireless adapters**. No se incluye ni instala automáticamente este controlador.
-- Permisos de administrador: si encuentra un adaptador compatible y faltan permisos, POLTERHEIST solicita la elevación normal de **UAC** y abre su ventana de trabajo. Windows requiere que el usuario acepte ese diálogo.
-- Un adaptador/controlador que permita captura monitor e inyección 802.11. La capacidad de mostrar redes no demuestra que permita inyectar.
-- El programa configura el adaptador automáticamente. Si utiliza uno conectado, esa conexión se pausará durante la prueba. Un adaptador dedicado permite conservar la conexión principal.
-
-El transporte Windows implementado admite la **prueba activa en 2.4 GHz**. El listado puede mostrar otras bandas; la prueba activa de 5 GHz permanece en el backend Linux y el detector no admite 6 GHz. Npcap debe entregar cabeceras Radiotap y el AP seleccionado debe observarse en la frecuencia exacta antes de transmitir. Un fallo de recepción/inyección produce `ERROR` o `INCONCLUSIVE`, nunca un negativo por suposición.
-
-La preparación automática guarda el modo y el nombre del perfil de conexión anterior, activa `monitor`, fija el canal seleccionado y comprueba el resultado. Al salir —también por error o Ctrl+C— restaura `managed` y solicita la reconexión al perfil anterior, verificando que Windows la confirme. Si el adaptador ya estaba en monitor, restaura su frecuencia original. No lee contraseñas. `radio_setup.json` registra el estado y cualquier fallo de restauración, que también se muestra en pantalla. Un cierre forzado del proceso o del sistema puede impedir ejecutar la restauración.
-
-**Un controlador que solo anuncia `managed` no permite este fingerprint en Windows**, aunque Npcap esté instalado con soporte 802.11. El programa informa de ese impedimento y deja `NOT_TESTED`, sin desconectar el adaptador ni pedir que lo prepares manualmente. `--check` muestra los modos disponibles. Para consultar el controlador directamente:
+**A Windows driver advertising only `managed` cannot perform this fingerprint**, even with Npcap installed. The result remains `NOT_TESTED`, without modifying the radio. `--check` lists supported modes. To query the driver directly:
 
 ```powershell
-$wifiGuid = 'GUID-DEL-ADAPTADOR'
+$wifiGuid = 'ADAPTER-GUID'
 $wlanHelper = "$env:SystemRoot\System32\Npcap\WlanHelper.exe"
 & $wlanHelper $wifiGuid modes
 ```
 
-Solo como recuperación si el proceso se cerró por la fuerza, puedes devolver el adaptador al modo normal desde PowerShell con permisos de administrador:
+For recovery after forced termination, an administrator can restore normal mode:
 
 ```powershell
 & $wlanHelper $wifiGuid mode managed
 ```
 
-La prueba se limita a los BSSID del alcance autorizado y bloquea desautenticación/desasociación. Se adapta únicamente la captura/transmisión y el control de canal del detector original a Scapy/Npcap; su lógica de detección y los archivos upstream no se modifican. Si el controlador no admite este flujo, utiliza un adaptador compatible en Kali. [Requisitos de Npcap](https://npcap.com/guide/npcap-devguide.html#npcap-feature-dot11).
+Transport is restricted to the authorized BSSID and blocks deauthentication/disassociation. Only platform capture/transmit and channel control are adapted; upstream files and detection decisions remain unchanged. [Npcap requirements](https://npcap.com/guide/npcap-devguide.html#npcap-feature-dot11).
 
-## Portal cautivo multirouter
+## Captive portal
 
-Si aparece que no hay una interfaz libre, ejecuta `.venv/bin/python script.py --portal-check` (con `sudo` también puede leer el firewall). El diagnóstico muestra cada interfaz y el motivo por el que no se puede usar. Distingue Ethernet virtual, puentes como `docker0`, interfaces ocupadas y radios sin modo AP; no modifica la red.
+On Kali/Linux, run `python3 script.py --setup` to install NetworkManager, `dnsmasq-base`, and nftables. Open `.venv/bin/python script.py` and choose **3**, or run `.venv/bin/python script.py --portal`.
 
-**Kali en VirtualBox:** el modo puente sobre la Wi-Fi de Windows entrega Ethernet virtual a Kali, no la antena. Añadir otra tarjeta Ethernet virtual no permite emitir un SSID. Para crear una Wi-Fi física desde la VM hace falta una antena USB con soporte AP cedida al invitado. Otra posibilidad es arrancar Kali Live directamente y usar el Ethernet del PC o USB tethering del móvil para Internet, dejando su Wi-Fi disponible para el AP. La compatibilidad AP depende del controlador. Conectar un router/AP físico a una VM requiere un segundo adaptador virtual unido al Ethernet físico dedicado. Una red host-only/interna sirve para un laboratorio de clientes virtuales, no para emitir Wi-Fi. [Redes de VirtualBox](https://docs.oracle.com/en/virtualization/virtualbox/7.1/user/networkingdetails.html).
+The wizard offers:
 
-El portal actual no implementa cliente Wi-Fi y AP simultáneos sobre la misma radio. Algunas combinaciones de controlador/firmware lo admiten, pero eso no proporciona acceso a la antena interna desde una VM.
+1. **Create Wi-Fi:** choose an SSID and WPA2 password. Requires a free Wi-Fi interface supporting **AP** mode on a permitted 2.4 GHz channel. Monitor mode is unnecessary. SSIDs accept 1-32 UTF-8 bytes; passwords require 8-63 ASCII characters.
+2. **Use a router as an access point:** connect one of its **LAN** ports to the Linux client Ethernet interface. Configure AP/bridge mode, disable its DHCP, and remove any other Internet uplink. The router keeps its configured Wi-Fi name. POLTERHEIST does not configure vendor administration panels.
+3. **Local preview (`v`):** works on Windows and Linux at `http://127.0.0.1:8080`. It does not create Wi-Fi or change other devices' access.
 
-Para usar un router/AP externo con un PC que ya tiene Wi-Fi y Ethernet, no hace falta comprar otra antena:
+### Automatic interface fallback
 
-1. Apaga Kali normalmente. En VirtualBox, conserva el adaptador de Internet y habilita el **Adaptador 2 → Adaptador puente**, eligiendo el **Ethernet físico** del PC. Un adaptador deshabilitado no se puede habilitar con la VM encendida.
-2. Conecta ese Ethernet a un puerto **LAN** del router/AP dedicado; desactiva el DHCP de ese router y su otra conexión a Internet. El router que proporciona Internet al PC sigue en la interfaz de salida.
-3. Arranca Kali y ejecuta `sudo .venv/bin/python script.py --portal-check`. Si hay reglas de Docker u otro firewall, esta versión rechaza el inicio; usa una instalación dedicada sin ese conflicto. No basta con añadir la tarjeta.
-4. En el menú, elige **3 → 2** y la interfaz Ethernet de clientes, que debe estar libre. Los dispositivos deben conectarse al router/AP dedicado para pasar por el portal.
+The selected mode is a preference. The wizard checks **every free candidate interface**, skipping the Internet uplink, interfaces with addresses or active connections, bridge members, bridges such as `docker0`, and incompatible radios. Wi-Fi candidates must be managed, support AP mode, have a dedicated PHY, and offer a permitted channel.
 
-En Kali/Linux, ejecuta `python3 script.py --setup` para instalar también NetworkManager, `dnsmasq-base` y nftables. Abre `.venv/bin/python script.py` y elige **3**, o entra directamente con `.venv/bin/python script.py --portal`.
+It tries compatible interfaces in the selected mode first. If none is usable, it tries the other mode: **Create Wi-Fi** or **External router/AP**. The selected mode/interface is printed. An external AP still needs to be connected/configured and confirmed by typing `AP`; Wi-Fi creation asks for the SSID and password. If an interface becomes unavailable during the final read-only checks, the next candidate is tried automatically.
 
-El asistente ofrece:
-
-1. **Crear una Wi-Fi:** eliges el nombre (SSID) y la contraseña WPA2. Usa una interfaz Wi-Fi libre con soporte **AP**, en un canal permitido de 2.4 GHz. Esta función no necesita modo monitor. El nombre admite UTF-8 hasta 32 bytes; la contraseña debe tener 8–63 caracteres ASCII.
-2. **Usar un router como punto de acceso:** conserva la Wi-Fi configurada en ese router. Conecta uno de sus puertos **LAN** a la interfaz Ethernet de clientes del equipo Linux, configura el router como AP/bridge y desactiva su DHCP. Esa red no debe tener otra salida a Internet que evite el portal. POLTERHEIST no configura automáticamente paneles de fabricantes.
-3. **Vista previa local:** funciona también en Windows y sirve la página en `http://127.0.0.1:8080`. No crea una Wi-Fi ni cambia el acceso de los demás dispositivos.
-
-En los dos modos reales, el equipo Linux es la **pasarela** y necesita **dos interfaces independientes**: una con la conexión a Internet y otra libre para los clientes. Por ejemplo, Internet por cable y una Wi-Fi nueva, o Internet por una interfaz y un router/AP conectado a una segunda interfaz Ethernet. No se utiliza la misma radio para Internet y el nuevo AP.
+If neither mode has a usable interface, the wizard reports:
 
 ```text
-Internet / router de salida
-            |
-    interfaz de Internet
-     Linux + POLTERHEIST
-     interfaz de clientes
-            |
-    Wi-Fi nueva O router/AP
-            |
-         clientes
+[!] No usable network interface is available for the captive portal.
 ```
 
-Esta arquitectura admite distintos fabricantes porque el control está en Linux. **Ejecutar POLTERHEIST como un cliente más del Wi-Fi actual no obliga a los demás a pasar por el portal.** Si quieres mantener ese Wi-Fi, hay que colocar su router/AP detrás de la pasarela como se indica arriba; si es tu único router de acceso a Internet, normalmente necesitarás un AP adicional o usar la Wi-Fi nueva del PC.
+Cancellation stops the wizard. Firewall conflicts, invalid configuration, and activation/cleanup failures retain their own errors instead of being disguised as missing interfaces. Fallback does not create hardware or take over occupied interfaces.
 
-Antes de aceptar, se permite DHCP, DNS y la página del portal; las peticiones HTTP se llevan a esa página y el resto del tráfico hacia Internet queda bloqueado. Al pulsar **Aceptar y navegar**, se habilita una sesión de una hora asociada a la IP y MAC del dispositivo. Al caducar, vuelve a requerirse aceptación. No se solicitan cuentas ni contraseñas en la página. HTTPS no se descifra ni se suplanta: para abrir el portal se usa la detección cautiva del dispositivo o la dirección HTTP que imprime el programa. La apertura automática depende del sistema del cliente.
+Detailed diagnostics do not change the network:
 
-NetworkManager crea una conexión temporal con DHCP, DNS y NAT. POLTERHEIST añade una tabla propia de nftables y no borra reglas ajenas. El inicio se rechaza si ya hay reglas `input/forward` de otro firewall, una interfaz de clientes ocupada o una subred que se solapa; utiliza un equipo dedicado. IPv6 está desactivado en la conexión de clientes y bloqueado en su forwarding para evitar eludir el portal por esa vía. La identidad IP/MAC sirve para gestionar sesiones, no para acreditar la identidad de una persona.
+```bash
+sudo .venv/bin/python script.py --portal-check
+```
 
-**Ctrl+C** detiene el portal, elimina su conexión temporal y restaura el estado comprobable de la interfaz y del forwarding IPv4. También se intenta restaurar tras fallos y SIGTERM. Si la restauración falla, se conserva la protección de nftables y se indica el motivo. Un apagado forzado o SIGKILL puede impedir la limpieza; `reports/portal/<sesión>/network.json` identifica el UUID de conexión y la tabla exclusivos de esa sesión para su recuperación. No ejecutes un borrado global de firewall. La contraseña no se incluye en los informes; su clave derivada se guarda en un archivo temporal solo accesible por root durante la sesión.
+### Topology and VirtualBox
 
-La vista previa desde Windows también se puede abrir con:
+Both real portal modes make Linux the **gateway** and require **two independent interfaces**: an Internet uplink and a free client interface. Simultaneous Wi-Fi client and AP operation on the same radio is not implemented.
+
+```text
+Internet / upstream router
+            |
+      Internet interface
+     Linux + POLTERHEIST
+       client interface
+            |
+    new Wi-Fi OR router/AP
+            |
+          clients
+```
+
+Different router vendors work because Linux controls the gateway. **Running POLTERHEIST as another client on the existing Wi-Fi does not force other clients through it.** Place the client AP behind this gateway. If the existing router is your only Internet router, use an additional AP or create a new Wi-Fi network from the PC.
+
+**Kali in VirtualBox:** bridging over Windows Wi-Fi gives Kali virtual Ethernet, not the radio. Another virtual Ethernet adapter cannot broadcast an SSID. Physical Wi-Fi inside a VM requires an AP-capable USB Wi-Fi adapter passed to the guest. Alternatively, boot Kali Live directly and use Ethernet or phone USB tethering for Internet, leaving Wi-Fi free for the AP. Actual AP support depends on the driver. Host-only/internal networks support virtual client labs, not physical Wi-Fi. [VirtualBox networking](https://docs.oracle.com/en/virtualization/virtualbox/7.1/user/networkingdetails.html).
+
+A PC with Wi-Fi and Ethernet can use an external router/AP without another Wi-Fi adapter:
+
+1. Shut down Kali normally. Keep the Internet adapter and enable **Adapter 2 > Bridged Adapter** in VirtualBox, selecting the PC's dedicated **physical Ethernet**. A disabled adapter cannot be enabled while the VM is running.
+2. Connect Ethernet to a **LAN** port on the dedicated AP. Disable that AP's DHCP and other Internet uplink. Keep the upstream Internet router on the Internet side.
+3. Start Kali and run `sudo .venv/bin/python script.py --portal-check`. Existing Docker or other firewall rules also block this version; use a dedicated installation without that conflict.
+4. Choose **3 > 2**. The wizard checks the free client interfaces. Devices must connect to the dedicated AP to pass through the portal.
+
+### Access and restoration
+
+Before acceptance, DHCP, DNS, and the portal are available. HTTP redirects to the portal; other Internet traffic is blocked. **Accept and connect** grants a one-hour session bound to the client's IP/MAC; acceptance is required again after expiry. The page requests no accounts or passwords. HTTPS is not decrypted or impersonated. Use client captive-portal detection or the HTTP address printed by the program; automatic opening depends on the client OS.
+
+NetworkManager creates a temporary connection with DHCP, DNS, and NAT. POLTERHEIST adds its own nftables table without deleting unrelated rules. Startup rejects existing `input/forward` firewall hooks or overlapping subnets. IPv6 is disabled for clients and blocked in forwarding. IP/MAC binding manages sessions; it does not establish a person's identity.
+
+**Ctrl+C** removes the temporary connection and restores the verifiable interface and IPv4 forwarding state. Cleanup is also attempted after errors and SIGTERM. If restoration fails, the nftables guard remains and the reason is reported. Forced shutdown/SIGKILL can prevent cleanup; `reports/portal/<session>/network.json` identifies the session's connection UUID and table for recovery. Do not flush the entire firewall. Reports exclude the Wi-Fi password; its derived key exists in a temporary root-only connection file during the session.
+
+Windows preview is also available directly:
 
 ```powershell
 .\.venv\Scripts\python.exe script.py --portal-preview
 ```
 
-El portal y el fingerprint son flujos separados: no ejecutes ambos sobre la misma radio. El uso físico de AP y la restauración con cada controlador siguen necesitando validación en el equipo de destino.
+Portal and fingerprinting are separate workflows; do not run both on the same radio. Physical AP operation and driver restoration still need validation with the target hardware.
 
-## Perfil
+## Profile and LAN reconnaissance
 
-WHO AM I permite editar nombre/alias, especialización, biografía, GitHub, LinkedIn, web y contacto. `config/profile.json` se crea con campos vacíos al abrirlo por primera vez. También se puede copiar y editar `config/profile.example.json`. No incluye información personal inventada. El perfil local se excluye de Git.
+WHO AM I edits name/alias, specialization, biography, GitHub, LinkedIn, website, and contact. `config/profile.json` starts empty or can be copied from `config/profile.example.json`. ENTER keeps a value; `-` clears it. The local profile is excluded from Git.
 
-## LAN RECON
+LAN discovery combines ARP/Nmap, deduplicated IPs, MACs, sources, and vendor evidence. Local computer and gateway identification are explicit. OS/type estimates have separate confidence from vendor estimates; locally administered MACs reduce OUI confidence. Apple does not imply iPhone, and Cisco IOS does not imply iOS.
 
-- **Ghost Mode:** escaneo completo con `-T2 --max-rate 50`. **Hunter Mode:** escaneo completo con `-T3`. Ambos generan tráfico y son detectables.
-- Descubrimiento combinado ARP/Nmap, IPs sin duplicados, MAC, fuentes y evidencias de fabricante. Identificación de máquina local y puerta de enlace.
-- Identificación preliminar mediante servicios y huellas de SO. Confianza de fabricante separada de confianza de tipo; una MAC aleatoria reduce la confianza del OUI. Apple no implica iPhone y Cisco IOS no implica iOS.
-- IDs estables entre tablas y selección: todas las IPs, todas las no móviles, o IDs personalizados. Ambas opciones automáticas excluyen LOCAL; la selección personalizada permite incluirlo. Los equipos desconocidos siguen incluidos en la opción no móvil.
-- Escaneo TCP de **1 a 65535**, detección de versiones y scripts NSE `default or vuln`, extracción de referencias CVE, CSV/JSON/XML y logs originales. Algunos scripts de estas categorías pueden ser intrusivos; se solicita autorización de la red antes de comenzar.
-- Indicadores de actividad con tiempo transcurrido. Si Nmap emite progreso y ETA, se muestra el porcentaje de **su fase actual**, no un porcentaje global inventado.
+Stable IDs support all IPs, all non-mobile IPs, or custom selection. Automatic selections exclude LOCAL; custom selection can include it. Unknown devices remain in the non-mobile selection. Scanning covers TCP ports **1-65535**, versions, NSE `default or vuln`, CVE references, CSV/JSON/XML, and original logs. **Ghost Mode** uses `-T2 --max-rate 50`; **Hunter Mode** uses `-T3`. Both generate detectable traffic, and some NSE scripts can be intrusive. Network authorization is requested before scanning.
 
-El alcance LAN es la subred IPv4 de la ruta predeterminada, con límite de 4096 direcciones. Una huella de SO es una estimación y una referencia CVE no confirma una vulnerabilidad. Los escaneos completos, especialmente Ghost, pueden tardar bastante.
+LAN scope is the default route's IPv4 subnet, limited to 4096 addresses. OS fingerprints are estimates and CVE references do not confirm vulnerability. Progress/ETA describes Nmap's current phase rather than an invented overall percentage. Full scans can take a long time.
 
-## WIRELESS RECON
+## Wireless implementation and recovery
 
-En Linux, `iw` enumera interfaces, PHY, controlador, modo actual, conexión, modos admitidos y frecuencias. Se prepara automáticamente una radio compatible y se restaura al terminar; NetworkManager sigue funcionando para las demás interfaces. En Windows se utiliza Native Wi-Fi para descubrir redes y WlanHelper para preparar/restaurar la radio.
+Linux uses `iw` to enumerate interfaces, PHYs, drivers, mode, connection, capabilities, and frequencies. Only the chosen radio is prepared/restored; NetworkManager continues managing other interfaces. Windows uses Native Wi-Fi for discovery and WlanHelper for setup/restoration.
 
-| Interfaz | Descubrimiento | Límites |
+| Interface | Discovery | Limitations |
 | --- | --- | --- |
-| Managed | `iw dev IFACE scan passive`; si falla, `nmcli device wifi list` | `nmcli` puede usar caché; no expone WPS ni RSSI en dBm en este listado. |
-| Monitor dedicada | Captura pasiva de beacons/probe responses con `tcpdump`, recorriendo frecuencias admitidas | Requiere root, canal inicial y radio sin otras interfaces. Restaura la frecuencia al terminar o cancelar. |
-| Windows managed | Native Wi-Fi: `WlanScan` + `WlanGetNetworkBssList` | Puede requerir permiso de ubicación; WPS/seguridad según los IE disponibles. |
+| Managed | `iw dev IFACE scan passive`, then `nmcli device wifi list` if needed | nmcli may use cached data and does not expose WPS or RSSI in dBm here. |
+| Dedicated monitor | Passive tcpdump beacon/probe-response capture over supported frequencies | Requires root, initial channel, and a dedicated radio; restores frequency on exit/cancel. |
+| Windows managed | `WlanScan` + `WlanGetNetworkBssList` | May require Location permission; WPS/security depend on available information elements. |
 
-La tabla muestra ID, SSID, BSSID, canal, seguridad, WPS, señal y evaluación. Un SSID con varios BSSID conserva una fila por punto de acceso. WPA/WPA2/WPA3, PSK/SAE, modos mixtos, OWE y redes abiertas se presentan cuando existe evidencia del backend. Si el AKM no es reconocible, se conserva la incertidumbre. El porcentaje de NetworkManager se muestra como porcentaje, nunca se transforma en dBm.
+The table shows ID, SSID, BSSID, channel, security, WPS, signal, and assessment. WPA/WPA2/WPA3, PSK/SAE, mixed modes, OWE, and open networks are shown when supported by evidence. Unknown AKMs remain uncertain. NetworkManager percentages are never converted to dBm. **WPS is independent of WPA2/WPA3.** `Detected` requires observed WPS elements; `Unknown` does not mean absent. Hidden SSIDs can be listed, but fingerprinting requires an exact observed SSID.
 
-**WPS es independiente de WPA2/WPA3.** Solo se marca `Detected` si aparece en elementos WPS observados; `Unknown` no equivale a ausencia de WPS. SSID ocultos pueden listarse, pero el detector requiere un SSID exacto y observado. Las bandas disponibles dependen del adaptador, controlador y dominio regulatorio.
+Virtual Ethernet cannot capture 802.11 frames. A VM needs USB Wi-Fi passthrough and a guest driver supporting monitor capture/injection. Advertised monitor support does not guarantee reception/injection. Check `iw dev`, `iw phy`, `rfkill list`, and firmware/driver messages.
 
-### Hardware y VirtualBox
+Linux saves mode, frequency, UP/DOWN state, NetworkManager management, and connection UUID. It releases only the selected interface from NetworkManager and uses `iw ... set monitor otherbss control`, then sets/verifies frequency. The original state/connection is restored on exit/cancel; failures are recorded in `radio_setup.json` and stop further tests. [Upstream setup](https://github.com/qkaiser/broadcom-wps#broadcom-sdk-fingerprinter).
 
-Una interfaz Ethernet virtual, incluso puenteada sobre el Wi-Fi del host, no permite capturar tramas 802.11. En VirtualBox se necesita **passthrough de un adaptador Wi-Fi USB** al invitado, con controlador Linux que admita monitor e inyección. Que `iw` anuncie monitor no garantiza recepción o inyección funcionales. Comprueba `iw dev`, `iw phy`, `rfkill list` y los mensajes de firmware/controlador.
-
-En Kali se guarda el modo original, frecuencia, estado UP/DOWN, gestión de NetworkManager y UUID de la conexión. Se libera **solo esa interfaz** de NetworkManager y se configura con `iw ... set monitor otherbss control`, necesario para recibir otras BSS con controladores como MediaTek. Se fija y verifica la frecuencia antes del detector. Al terminar o cancelar, se restauran modo/estado y la conexión anterior; los fallos se guardan en `radio_setup.json`. No se cambia el dominio regulatorio. [Configuración upstream](https://github.com/qkaiser/broadcom-wps#broadcom-sdk-fingerprinter).
-
-Si falla la restauración se detiene el resto de pruebas. Un apagado o cierre forzado puede impedirla; para recuperar manualmente una interfaz que originalmente estaba en managed, sustituye `wlan1`:
+After forced termination, restore an originally managed interface manually, replacing `wlan1`:
 
 ```bash
 sudo ip link set dev wlan1 down
@@ -212,72 +206,51 @@ sudo ip link set dev wlan1 up
 sudo nmcli device set wlan1 managed yes
 ```
 
-En Linux, la aplicación rechaza cambios de canal/pruebas cuando otra interfaz comparte el mismo PHY, aunque parezca desconectada. No cambia automáticamente el dominio regulatorio ni intenta usar canales deshabilitados. Para fingerprint activo también rechaza canales no IR/DFS y 6 GHz, que el adaptador de este detector no maneja sin ambigüedad. En Windows prepara el adaptador compatible y verifica monitor/canal antes de abrir la captura. El descubrimiento puede listar 6 GHz si el hardware lo expone.
+Linux rejects channel changes/testing on shared PHYs, even when other interfaces are disconnected. Active fingerprinting also rejects disabled/no-IR/DFS channels and 6 GHz. The regulatory domain is not changed. Windows verifies monitor mode/channel before capture. Discovery can list 6 GHz when the hardware exposes it.
 
-### Evaluación WPSplinter
+### WPSplinter integration
 
-Se integra [`qkaiser/broadcom-wps`](https://github.com/qkaiser/broadcom-wps/tree/3cb3ef77d6b71e8441a51668c7e2b919608180f9), de **Quentin Kaiser**, commit completo **`3cb3ef77d6b71e8441a51668c7e2b919608180f9`**, licencia MIT. Referencia: [One Parser, Two Bugs](https://quentinkaiser.be/security/2026/10/16/one-parser-two-bugs/).
+The project imports [`qkaiser/broadcom-wps`](https://github.com/qkaiser/broadcom-wps/tree/3cb3ef77d6b71e8441a51668c7e2b919608180f9) by **Quentin Kaiser**, pinned to **`3cb3ef77d6b71e8441a51668c7e2b919608180f9`**, under the MIT license. Reference: [One Parser, Two Bugs](https://quentinkaiser.be/security/2026/10/16/one-parser-two-bugs/).
 
-1. Toma el SSID conectado, o el indicado mediante `--ssid`, como alcance autorizado. `--bssid` lo restringe a una radio.
-2. Descubre los AP y evalúa secuencialmente solo los BSSID que coinciden con ese alcance.
-3. Prepara/restaura automáticamente el adaptador correspondiente al sistema operativo.
-4. Cada prueba vuelve a observar pasivamente su SSID/BSSID en su canal antes del intercambio activo.
-5. Muestra una sola tabla final con los resultados por BSSID; el resto de redes queda en `NOT_TESTED`.
+SHA-256 verifies the original detector. Its SSID-only launcher is not used because it could choose another BSSID with the same name. `fingerprint_target` and `decide_assessment` remain unchanged. Each target is passively re-observed on its channel before the active exchange.
 
-Se importa la API del detector original, cuya integridad SHA-256 se verifica. Su lanzador por SSID no se utiliza: podría elegir otro BSSID con el mismo nombre. Las decisiones de `fingerprint_target` y `decide_assessment` permanecen sin modificar.
+Transport pins the BSSID and blocks deauthentication/disassociation. Upstream normally deauthenticates to close its own test session; blocking it is recorded as `cleanup_sent=false`. An explicit response can retain its classification while upstream reports `target_health=DEGRADED`. Temporary AP state may persist until timeout; cleanup is not claimed to have succeeded. The application does not extract credentials, run arbitrary payloads, or open shells.
 
-El backend de transporte añade dos restricciones: fija el BSSID seleccionado y bloquea transmisiones de desautenticación/desasociación. El upstream usa desautenticación para cerrar su propia sesión de prueba; aquí se bloquea y se informa honestamente como `cleanup_sent=false`. Una respuesta explícita puede conservar su clasificación mientras `target_health` queda `DEGRADED` según upstream. Puede quedar estado temporal en el AP hasta su timeout; no se afirma que la limpieza haya funcionado. La herramienta no extrae credenciales, ejecuta cargas arbitrarias ni abre shells.
-
-| Salida upstream | Clasificación POLTERHEIST |
-| --- | --- |
-| `LIKELY_VULNERABLE` | `LIKELY_VULNERABLE` |
-| `PATCHED_HOSTAPD` | `PATCHED_HOSTAPD` |
-| `NO_BROADCOM_FINGERPRINT` | `NO_BROADCOM_FINGERPRINT` |
-| `INCONCLUSIVE` o salida desconocida | `INCONCLUSIVE` |
-| Sin autorización / prueba no iniciada | `NOT_TESTED` |
-| Error de entorno, de ejecución o discrepancia de objetivo | `ERROR` |
-
-La ausencia de WPS se conserva como `INCONCLUSIVE` según el código del detector. Un resultado positivo identifica comportamiento de una implementación; **no confirma RCE**. Un negativo se limita a este detector y no certifica que el equipo sea seguro.
-
-## Informes
+## Reports
 
 ```text
 reports/
-  lan/<fecha_UTC_microsegundos_id>/
+  lan/<UTC_timestamp_microseconds_id>/
     report.json, report.csv, discovery.json, identification.json, selection.json
     discovery_*.log, discovery_nmap.xml, identify_*.xml, identify_*.log
     scan_*.xml, scan_*.log, scan_*_status.json, results.json
-  wireless/<fecha_UTC_microsegundos_id>/
-    report.json, discovery.json, iw_scan.log o nmcli_scan.log
-    windows_bss.bin, windows_discovery.json  # descubrimiento nativo Windows
-    fingerprint.json                   # resumen compatible si hay un único objetivo
-    discovery_*MHz.pcap y .log          # si se captura en monitor
-    targets/<BSSID_sin_dos_puntos>/
+  wireless/<UTC_timestamp_microseconds_id>/
+    report.json, discovery.json, iw_scan.log or nmcli_scan.log
+    windows_bss.bin, windows_discovery.json  # native Windows evidence
+    fingerprint.json                       # summary for a single target
+    discovery_*MHz.pcap and .log            # monitor capture, when available
+    targets/<BSSID_without_colons>/
       report.json, fingerprint.json
-      radio_setup.json                 # preparación/restauración Linux o Windows
-      upstream_result.json, fingerprint.pcap  # si se generan durante la prueba
+      radio_setup.json                     # Linux/Windows setup and restoration
+      upstream_result.json, fingerprint.pcap
+  portal/<UTC_timestamp_microseconds_id>/
+    config.json, network.json              # no password; lifecycle state
 ```
 
-Los informes incluyen versión, hora UTC, objetivo, autorización, fuentes, clasificación, límites y recomendaciones. El informe inalámbrico incluye seguridad, canal, señal, indicadores WPS, identidad de fabricante disponible, salida upstream y hashes de las evidencias. JSON y PCAP originales no se reescriben para cambiar conclusiones. Cada ejecución usa una carpeta nueva. Ctrl+C conserva lo disponible y devuelve al menú; no se inventan resultados para procesos interrumpidos. Un XML truncado se conserva aunque no se pueda analizar.
+Reports include version, UTC time, target, authorization, sources, classification, limitations, and available evidence. Wireless reports preserve security, channel, signal, WPS, available vendor identity, upstream output, and evidence hashes. Original JSON/PCAP evidence is not rewritten to alter conclusions. Each run uses a new folder. Ctrl+C preserves available evidence; interrupted operations receive no invented results. Truncated XML is preserved even when parsing fails.
 
-`reports/`, PCAP, perfil real y entornos virtuales están excluidos de Git para que una subida no publique inventarios de red ni datos personales.
+Reports, captures, real profiles, and virtual environments are excluded from Git. Network names, device-provided text, and original external-tool evidence are preserved as received, regardless of language.
 
-## Pruebas
-
-El portal tiene pruebas HTTP reales en loopback, validación de formularios y tokens por IP/MAC, caducidad y restauración tras fallo o cancelación. El trabajo `portal-gateway` crea tres espacios de red Linux aislados: comprueba la redirección HTTP, el bloqueo del tráfico antes de aceptar, el acceso posterior, la caducidad y la conservación de reglas ajenas. También valida los perfiles con el parser real de NetworkManager y ejecuta su ciclo de activación/restauración usando un D-Bus privado. Estas pruebas no se conectan a redes Wi-Fi ni modifican el router del usuario.
+## Tests
 
 ```bash
 .venv/bin/python -m unittest discover -s tests -v
 ```
 
-Las pruebas sin hardware cubren menú y perfil, descubrimiento LAN combinado, selección/local/Apple, identificación, servicios/CVE, modos, interfaces, WPA/WPA2/WPA3, escapes de SSID, selección/autorización, decisiones **del código upstream real con respuestas simuladas**, bloqueo de desautenticación/otro BSSID, JSON/PCAP y cancelación. Las capturas y salidas de red de los tests son fixtures sintéticos, no mediciones de redes reales.
+Portal tests cover real loopback HTTP, forms, IP/MAC-bound single-use tokens, expiry, restoration, and interface fallback. They exercise unusable first adapters, both modes, exhausted candidates, and failures that must not trigger another attempt. The `portal-gateway` CI job uses three isolated Linux network namespaces for real redirection, blocked traffic, acceptance, access, expiry, and preservation of unrelated rules. It also checks real NetworkManager profile parsing and activation/restoration with private D-Bus. Tests do not connect to physical Wi-Fi or modify a user's router.
 
-Si Nmap está instalado, una prueba adicional arranca un servidor HTTP temporal en **127.0.0.1** y lo inspecciona con Nmap real. GitHub Actions ejecuta la suite en **Linux y Windows**, con Python 3.11 y 3.13, e instala Nmap para el test local en Linux. Esta prueba no equivale a validar el escaneo de 65535 puertos, ARP, huellas de SO ni NSE de vulnerabilidades sobre equipos reales.
+Offline tests cover menus/profiles, LAN discovery, selection, vendor/OS estimates, services/CVEs, security parsing, SSID escaping, authorization, **real upstream decisions with simulated responses**, transport guards, evidence, and cancellation. Captures are synthetic fixtures. With Nmap installed, a real Nmap test inspects a temporary HTTP server on **127.0.0.1**; this does not validate full-port scans, ARP, OS fingerprinting, or vulnerability NSE on real devices.
 
-Otro trabajo de CI usa la imagen oficial `kalilinux/kali-rolling`, ejecuta `script.py --setup` y `--check`, verifica que se detecta Kali y corre la suite dentro de esa distribución. La preparación Linux se prueba con radios simuladas, incluyendo fallos parciales, cancelación, reconexión y exclusión de canales no permitidos. También se verifica que la tabla aparece una sola vez, después de evaluar los BSSID del SSID conectado, sin probar redes de otro nombre.
+GitHub Actions runs Linux/Windows with Python 3.11/3.13, installs Nmap on Linux, and separately runs setup/check/tests in official `kalilinux/kali-rolling`. Radio tests simulate partial failures, cancellation, reconnection, unsupported drivers, regulatory constraints, Windows UAC, and Npcap adaptation. Native discovery/profile reading has been checked on a MediaTek MT7921 in Windows. Active monitor reception/injection, regulatory behavior, restoration, and physical AP fingerprinting still need compatible hardware validation. Automated tests do not transmit Wi-Fi traffic.
 
-Los tests de Windows cubren estructuras/offsets de Native Wi-Fi, BSSID múltiples, WPS real en IE sintéticos, WPA/RSN, errores de ubicación/servicio, notificaciones, caché, memoria nativa, conservación de evidencias y adaptación a Npcap. También comprueban elevación UAC simulada, preparación, fallos parciales, cancelación, restauración y reconexión al perfil anterior, además de rechazar controladores sin monitor antes de modificar la radio. El descubrimiento y la lectura del perfil activo se han comprobado con un MediaTek MT7921 en Windows. La preparación y el intercambio WPS activo están validados con mocks; requieren una prueba física con hardware/controlador compatible.
-
-Pendiente de validación física: recepción/inyección monitor, regulación y restauración de canal en cada controlador Linux, y fingerprint de un AP autorizado en ambas plataformas. Los tests automatizados no necesitan ni transmiten tráfico Wi-Fi.
-
-Documentación de referencia: [iw](https://wireless.docs.kernel.org/en/latest/en/users/documentation/iw.html), [nmcli](https://networkmanager.dev/docs/api/latest/nmcli.html) y [salida de Nmap](https://nmap.org/book/man-output.html).
+References: [iw](https://wireless.docs.kernel.org/en/latest/en/users/documentation/iw.html), [nmcli](https://networkmanager.dev/docs/api/latest/nmcli.html), and [Nmap output](https://nmap.org/book/man-output.html).

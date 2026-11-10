@@ -32,14 +32,18 @@ class FingerprintTests(unittest.TestCase):
 
     def test_explicit_detector_verdicts(self):
         for original, expected, title in [
-            ("LIKELY_VULNERABLE", "LIKELY_VULNERABLE", "PROBABLEMENTE VULNERABLE"),
-            ("PATCHED_HOSTAPD", "PATCHED_HOSTAPD", "BROADCOM CON HOSTAPD SEGÚN EL DETECTOR"),
+            ("LIKELY_VULNERABLE", "LIKELY_VULNERABLE", "LIKELY VULNERABLE"),
+            (
+                "PATCHED_HOSTAPD",
+                "PATCHED_HOSTAPD",
+                "BROADCOM WITH HOSTAPD ACCORDING TO THE DETECTOR",
+            ),
             (
                 "NO_BROADCOM_FINGERPRINT",
                 "NO_BROADCOM_FINGERPRINT",
-                "SIN HUELLA BROADCOM SEGÚN EL DETECTOR",
+                "NO BROADCOM FINGERPRINT ACCORDING TO THE DETECTOR",
             ),
-            ("INCONCLUSIVE", "INCONCLUSIVE", "NO CONCLUYENTE"),
+            ("INCONCLUSIVE", "INCONCLUSIVE", "INCONCLUSIVE"),
         ]:
             with self.subTest(original=original):
                 summary = app.fingerprint_summary(self.ap, "INCONCLUSIVE", self.evidence(original))
@@ -51,7 +55,7 @@ class FingerprintTests(unittest.TestCase):
         for classification in ["LIKELY_VULNERABLE", "PATCHED_HOSTAPD", "NO_BROADCOM_FINGERPRINT"]:
             summary = app.fingerprint_summary(self.ap, classification)
             self.assertEqual(summary["assessment"], "INCONCLUSIVE")
-            self.assertIn("salida original", summary["reason"])
+            self.assertIn("original detector output", summary["reason"])
 
     def test_wrong_target_never_supports_conclusion(self):
         for field, wrong in [("ssid", "Other"), ("bssid", "02:00:00:00:00:02")]:
@@ -71,9 +75,11 @@ class FingerprintTests(unittest.TestCase):
 
     def test_wps_present_or_vendor_never_becomes_vulnerability(self):
         self.ap.update(wps="Detected", manufacturer_evidence=[{"value": "Broadcom"}])
-        summary = app.fingerprint_summary(self.ap, "NOT_TESTED", reason="Falta Npcap")
-        self.assertEqual(summary["verdict"], "NO EVALUADO")
-        self.assertEqual(summary["reason"], "Falta Npcap")
+        summary = app.fingerprint_summary(
+            self.ap, "NOT_TESTED", reason="Npcap with raw 802.11 support is missing"
+        )
+        self.assertEqual(summary["verdict"], "NOT TESTED")
+        self.assertEqual(summary["reason"], "Npcap with raw 802.11 support is missing")
         self.assertIsNone(summary["detector_assessment"])
 
     def test_actual_upstream_silence_and_no_wps_remain_inconclusive(self):
@@ -90,7 +96,7 @@ class FingerprintTests(unittest.TestCase):
             path = self.folder / "upstream_result.json"
             upstream.write_result_json(result, path, self.folder / "unused.pcap")
             summary = app.fingerprint_summary(self.ap, "INCONCLUSIVE", json.loads(path.read_text()))
-            self.assertEqual(summary["verdict"], "NO CONCLUYENTE")
+            self.assertEqual(summary["verdict"], "INCONCLUSIVE")
 
     def test_saved_summary_preserves_raw_file_and_only_changes_selected_ap(self):
         original = self.evidence("PATCHED_HOSTAPD")
@@ -124,7 +130,7 @@ class FingerprintTests(unittest.TestCase):
         for text in [
             "WPS FINGERPRINT",
             "PATCHED_HOSTAPD",
-            "BROADCOM CON HOSTAPD SEGÚN EL DETECTOR",
+            "BROADCOM WITH HOSTAPD ACCORDING TO THE DETECTOR",
             "ACK",
             "DEGRADED",
             "cleanup failed",
@@ -168,8 +174,8 @@ class FingerprintTests(unittest.TestCase):
         probe.assert_not_called()
         report = json.loads((self.folder / "report.json").read_text(encoding="utf-8"))
         self.assertEqual(report["assessment"], "NOT_TESTED")
-        self.assertIn("Falta Npcap", report["fingerprint"]["reason"])
-        self.assertIn("Falta Npcap", output.getvalue())
+        self.assertIn("Npcap with raw 802.11 support is missing", report["fingerprint"]["reason"])
+        self.assertIn("Npcap with raw 802.11 support is missing", output.getvalue())
         self.assertEqual(output.getvalue().count("WIRELESS RESULTS"), 1)
         self.assertNotIn("[1] " + self.ap["bssid"], output.getvalue())
         self.assertTrue((self.folder / "fingerprint.json").is_file())

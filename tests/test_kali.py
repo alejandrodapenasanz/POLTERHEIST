@@ -260,7 +260,7 @@ class KaliTests(unittest.TestCase):
                 "classification": "INCONCLUSIVE",
                 "original": None,
                 "limitations": [],
-                "error": None if restore_failed else "Interrumpido por el operador",
+                "error": None if restore_failed else "Interrupted by the operator",
                 "radio_setup": {"restore_error": "driver failed"}
                 if restore_failed
                 else {"restored": True},

@@ -11,3 +11,7 @@ reports/
 .env
 config/profile.json
 *.log
+.cache/tv_control/
+config/tv_control.json
+media/*
+!media/.gitkeep

@@ -1,0 +1,15 @@
+{
+  "bind_ip": "",
+  "http_port": 8765,
+  "discovery_timeout": 5,
+  "request_timeout": 5,
+  "connect_timeout": 10,
+  "poll_interval": 2,
+  "retries": 2,
+  "max_devices": 32,
+  "conversion_timeout": 600,
+  "auto_convert": true,
+  "discovery_backends": ["cast", "upnp", "airplay"],
+  "directed_max_hosts": 16,
+  "directed_workers": 4
+}

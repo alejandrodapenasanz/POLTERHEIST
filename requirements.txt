@@ -1,3 +1,7 @@
-# Python >= 3.11. Required only for monitor/PCAP and the WPS detector.
+# Python >= 3.11. Scapy is required for monitor/PCAP and the WPS detector.
 # The HTTP portal uses the standard library; --setup installs its Linux tools.
 scapy==2.7.0
+# TV Control (FFmpeg/ffprobe are system tools, installed by --setup on Kali).
+PyChromecast==14.1.1
+zeroconf==0.154.0
+ifaddr==0.2.0

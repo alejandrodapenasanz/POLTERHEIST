@@ -262,6 +262,7 @@ def setup_environment():
             "nftables",
             "nmap",
             "arp-scan",
+            "ffmpeg",
         ]
         if system["id"] == "kali":
             packages.append("firmware-mediatek")
@@ -3846,7 +3847,33 @@ def who_am_i():
         dump_json(PROFILE_PATH, updated)
 
 
+def tv_control():
+    from tv_control.cli import run
+
+    return run(BASE)
+
+
+def tv_diagnostics():
+    from tv_control.hardware import run
+
+    return run(BASE)
+
+
+def shutdown_tv_control():
+    # Do not import TV dependencies unless the feature has been opened.
+    module = sys.modules.get("tv_control.cli")
+    if module:
+        module.shutdown()
+
+
 def main(argv=None):
+    try:
+        return run_main(argv)
+    finally:
+        shutdown_tv_control()
+
+
+def run_main(argv=None):
     parser = argparse.ArgumentParser(
         description="POLTERHEIST: authorized LAN and Wi-Fi reconnaissance"
     )
@@ -3879,11 +3906,53 @@ def main(argv=None):
     parser.add_argument("--portal-choice", choices=("1", "2"), help=argparse.SUPPRESS)
     parser.add_argument("--portal", action="store_true", help="Open the captive portal wizard")
     parser.add_argument(
+        "--tv-control", action="store_true", help="Open local TV discovery and media casting"
+    )
+    parser.add_argument(
+        "--tv-diagnostics",
+        action="store_true",
+        help="Read-only Kali TV hardware diagnostics; no network required",
+    )
+    parser.add_argument(
         "--portal-preview",
         action="store_true",
         help="Preview the portal on localhost without changing the network",
     )
     options = parser.parse_args(argv)
+    if options.tv_diagnostics:
+        if any(
+            (
+                options.tv_control,
+                options.setup,
+                options.check,
+                options.portal_check,
+                options.portal,
+                options.portal_preview,
+                options.portal_choice,
+                options.wireless,
+                options.ssid,
+                options.bssid,
+            )
+        ):
+            parser.error(
+                "Run --tv-diagnostics separately; it never installs tools or changes networking."
+            )
+        try:
+            return tv_diagnostics()
+        except (KeyboardInterrupt, EOFError):
+            return 130
+        except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as error:
+            print("  [!] " + safe_text(error))
+            return 1
+    if options.tv_control and (
+        options.portal
+        or options.portal_preview
+        or options.portal_choice
+        or options.wireless
+        or options.ssid
+        or options.bssid
+    ):
+        parser.error("Run TV Control separately from portal/wireless workflows.")
     if options.portal_choice:
         options.portal = True
     if (options.portal or options.portal_preview) and (
@@ -3943,6 +4012,14 @@ def main(argv=None):
         return 0
     print(tint(BANNER))
     print(tint(f"  POLTERHEIST :: WATCHING THE WIRE :: v{VERSION}", AMBER))
+    if options.tv_control:
+        try:
+            return tv_control() or 0
+        except (KeyboardInterrupt, EOFError):
+            return 130
+        except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as error:
+            print(tint("  [!] " + safe_text(error), AMBER))
+            return 1
     if options.portal or options.portal_preview:
         try:
             if options.portal_preview:
@@ -3976,7 +4053,7 @@ def main(argv=None):
     while True:
         print(
             tint(
-                "\n[0] WHO AM I?\n[1] LAN RECON\n[2] WIRELESS RECON\n[3] CAPTIVE PORTAL\n\n[q] EXIT"
+                "\n[0] WHO AM I?\n[1] LAN RECON\n[2] WIRELESS RECON\n[3] CAPTIVE PORTAL\n[4] TV CONTROL — Smart TV Discovery & Media Casting\n\n[q] EXIT"
             )
         )
         try:
@@ -3986,9 +4063,13 @@ def main(argv=None):
             return 0
         if choice == "q":
             return 0
-        action = {"0": who_am_i, "1": lan_recon, "2": wireless_recon, "3": captive_portal}.get(
-            choice
-        )
+        action = {
+            "0": who_am_i,
+            "1": lan_recon,
+            "2": wireless_recon,
+            "3": captive_portal,
+            "4": tv_control,
+        }.get(choice)
         if action is None:
             print("  Invalid option.")
             continue

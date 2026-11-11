@@ -1,17 +1,18 @@
 # POLTERHEIST
 
-Inventory and assessment for networks you own or are authorized to test: **LAN reconnaissance on Kali/Linux, Wi-Fi/WPS on Linux and Windows, and a captive portal on Kali/Linux**. Menus, diagnostics, report explanations, and the portal page are in English.
+Inventory and assessment for networks you own or are authorized to test: **LAN reconnaissance on Kali/Linux, Wi-Fi/WPS on Linux and Windows, a captive portal on Kali/Linux, and local TV media casting**. Menus, diagnostics, report explanations, and the portal page are in English.
 
 ```text
 [0] WHO AM I?
 [1] LAN RECON
 [2] WIRELESS RECON
 [3] CAPTIVE PORTAL
+[4] TV CONTROL — Smart TV Discovery & Media Casting
 
 [q] EXIT
 ```
 
-The application lives in **`script.py`**, organized into functions. `POLTERHEIST.py` is a compatibility entry point. The external detector remains in `vendor/` to preserve its original code, license, and provenance.
+The application entry point and existing workflows live in **`script.py`**, organized into functions. `POLTERHEIST.py` is a compatibility entry point. The independent **`tv_control/`** package provides media discovery and playback. The external detector remains in `vendor/` to preserve its original code, license, and provenance.
 
 ## Kali installation
 
@@ -39,6 +40,18 @@ To specify another authorized network or restrict assessment to one BSSID:
 ```
 
 Without a connected network or `--ssid`, discovery runs without active fingerprinting. Each BSSID receives its own result; assessments are not copied between radios sharing an SSID.
+
+## TV Control
+
+Choose **4**, or run `.venv/bin/python script.py --tv-control`. Discovery includes **Google Cast, DLNA/UPnP, DIAL, AirPlay and RAOP**, with separate evidence for advertisements, reachability and playback support. Directed discovery accepts a confirmed IPv4, hostname or small CIDR, including routed networks. Playback remains Cast/DLNA on the selected LAN and requires explicit confirmation for every session, including a single receiver.
+
+Put PNG/JPEG/WEBP images and MP4/MKV/MOV/WEBM videos in **this repository's `media/` directory**, not the operating system's `/media`. FFprobe validates the content and codecs. Cast images become cached 720p H.264 MP4 clips; compatible videos play directly and other videos use conservative conversion. DLNA uses advertised generic image/MP4 formats; unsupported or profile-specific formats are reported explicitly. Playback repeats, with independent status, pause, resume, stop, media changes and target changes. Devices must be owned by you or authorized for control.
+
+Kali `--setup` installs FFmpeg/ffprobe and the venv requirements (PyChromecast, zeroconf and ifaddr). TV Control needs no root privileges. Its HTTP server binds only the selected local IPv4 address on port **8765**, serves selected files through opaque URLs with byte ranges, and closes after the last session. Returning to the main menu can preserve playback; exiting POLTERHEIST stops it.
+
+Run `.venv/bin/python script.py --tv-diagnostics` for read-only Kali hardware diagnostics, even without a LAN. It checks Wi-Fi/P2P, driver/chipset IDs, BlueZ, encoders and desktop capture prerequisites without scanning radios, pairing, capturing or changing system configuration.
+
+See **[H1 research and technology matrices](docs/tv_engine/RESEARCH.md)**, **[architecture](docs/tv_engine/ARCHITECTURE.md)**, **[H2/H3 usage and validation](docs/tv_engine/VALIDATION.md)** and **[TV Control guide](docs/TV_CONTROL.md)**. AirPlay/RAOP/DIAL additions are discovery only. Direct wireless/Miracast, vendor control and new media transports await validation of H2/H3. Automated tests use labeled fixtures and loopback simulators; physical Kali/TV compatibility remains unverified.
 
 ## Wi-Fi and WPS on Windows
 

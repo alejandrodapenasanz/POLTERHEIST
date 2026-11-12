@@ -67,7 +67,8 @@ class Discovery:
                     (
                         g
                         for g in groups
-                        if g[0].ip == endpoint.ip
+                        if endpoint.ip
+                        and g[0].ip == endpoint.ip
                         and endpoint.protocol not in {e.protocol for e in g}
                     ),
                     None,
@@ -96,6 +97,8 @@ class Discovery:
         return list(self.devices.values())
 
     def scan(self, target=None):
+        if self.network is None:
+            raise ValueError("No selected IPv4 LAN; Wi-Fi Direct discovery remains available")
         if target:
             target = self.network.target(target)
         self.warnings = []
@@ -115,7 +118,52 @@ class Discovery:
             except BaseException:
                 pool.shutdown(wait=False, cancel_futures=True)
                 raise
-        return self.merge(endpoints, refresh=target is None)
+        if target is None:
+            return self.replace_scope(endpoints, lambda e: e.details.get("transport") != "p2p")
+        return self.merge(endpoints, refresh=False)
+
+    def replace_scope(self, endpoints, predicate):
+        retained = [
+            e
+            for device in self.devices.values()
+            if device.available
+            for e in device.endpoints
+            if not predicate(e)
+        ]
+        for device in self.devices.values():
+            if any(predicate(e) for e in device.endpoints):
+                device.available = False
+        return self.merge([*endpoints, *retained], refresh=False)
+
+    def add_wireless(self, result):
+        if not result.started:
+            return list(self.devices.values())
+        interface = result.adapter["interface"]
+        fresh_ids = {e.uid for e in result.endpoints if e.details.get("fresh")}
+        self.replace_scope(
+            result.endpoints,
+            lambda e: (
+                e.details.get("transport") == "p2p" and e.details.get("interface") == interface
+            ),
+        )
+        for device in self.devices.values():
+            if (
+                device.primary.details.get("transport") == "p2p"
+                and device.primary.details.get("interface") == interface
+            ):
+                device.available = any(e.uid in fresh_ids for e in device.endpoints)
+        self.results.append(
+            {
+                "backend": "p2p/" + result.adapter["backend"],
+                "scope": interface,
+                "status": result.state,
+                "fresh_count": result.fresh_count,
+                "cached_count": result.cached_count,
+                "recorded_at": result.recorded_at,
+                "state_preserved": result.state_preserved,
+            }
+        )
+        return list(self.devices.values())
 
     def _probe(self, backend, network, target):
         start = time.monotonic()
@@ -176,7 +224,11 @@ class Discovery:
                     found, result = future.result()
                     for endpoint in found:
                         endpoint.sources.append("Explicit routed scope")
-                        if not self.network.accepts(endpoint.ip) or network.ip != self.network.ip:
+                        if (
+                            self.network is None
+                            or not self.network.accepts(endpoint.ip)
+                            or network.ip != self.network.ip
+                        ):
                             endpoint.controllable = False
                             endpoint.note += "; discovery only outside selected LAN; media return route unverified"
                     endpoints.extend(found)

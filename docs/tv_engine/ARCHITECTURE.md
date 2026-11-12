@@ -1,5 +1,7 @@
 # H1 — Propuesta de arquitectura y frontera H2/H3
 
+Actualización H4 (12-11-2026): se mantiene el diseño base descrito abajo. `p2p.py`/`wireless_bus.py` implementan adaptadores de descubrimiento radio explícitos; `wireless.py` gestiona el ciclo separado del scan IP; `wfd.py` aporta clasificación basada en anuncios. La UI funciona sin LAN IPv4. `miracast.py` prepara una integración externa y una presentación local, sin conexión Miracast activada. Véanse [investigación H4](H4_RESEARCH.md), [validación H4](H4_VALIDATION.md) y [ROADMAP](../../ROADMAP.md). La puerta H2/H3 se abrió mediante la nueva tarea H4; siguen pendientes validación física e instalación/cambios autorizados.
+
 ## Punto de partida inspeccionado
 
 `script.py` contiene el menú y las funciones previas; `POLTERHEIST.py` importa `main`. TV Control es un paquete independiente con `Discovery`, `Endpoint`/`Device`, `Manager`/`Session`, `MediaLibrary`, `MediaServer` y dos backends de reproducción. Pruebas con unittest, formato/lint con Ruff y dependencias fijadas en `requirements.txt`. El directorio de trabajo ya contiene la implementación de la entrega anterior: se conserva, sin tratar esos cambios como descartables.

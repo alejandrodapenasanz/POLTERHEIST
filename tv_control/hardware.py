@@ -252,14 +252,23 @@ def collect(runner=None, platform=None, sysfs="/sys", environ=None, progress=Non
     probe("neighbors", ["ip", "-j", "neigh", "show"])
     probe("networkmanager", ["nmcli", "-t", "-f", "DEVICE,TYPE,STATE", "device", "status"])
     probe("rfkill", ["rfkill", "--json", "list"])
-    bus = ["busctl", "--system", "--auto-start=no", "--timeout=3"]
+    bus = [
+        "busctl",
+        "--system",
+        "--auto-start=no",
+        "--allow-interactive-authorization=no",
+        "--timeout=3",
+    ]
     supplicant = probe(
         "supplicant",
         [
             *bus,
-            "get-property",
+            "call",
             "fi.w1.wpa_supplicant1",
             "/fi/w1/wpa_supplicant1",
+            "org.freedesktop.DBus.Properties",
+            "Get",
+            "ss",
             "fi.w1.wpa_supplicant1",
             "Capabilities",
         ],
@@ -268,9 +277,12 @@ def collect(runner=None, platform=None, sysfs="/sys", environ=None, progress=Non
         "wfd_property",
         [
             *bus,
-            "get-property",
+            "call",
             "fi.w1.wpa_supplicant1",
             "/fi/w1/wpa_supplicant1",
+            "org.freedesktop.DBus.Properties",
+            "Get",
+            "ss",
             "fi.w1.wpa_supplicant1",
             "WFDIEs",
         ],
@@ -312,10 +324,14 @@ def collect(runner=None, platform=None, sysfs="/sys", environ=None, progress=Non
             "busctl",
             "--user",
             "--auto-start=no",
+            "--allow-interactive-authorization=no",
             "--timeout=3",
-            "get-property",
+            "call",
             "org.freedesktop.portal.Desktop",
             "/org/freedesktop/portal/desktop",
+            "org.freedesktop.DBus.Properties",
+            "Get",
+            "ss",
             "org.freedesktop.portal.ScreenCast",
             "AvailableSourceTypes",
         ],

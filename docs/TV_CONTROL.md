@@ -2,7 +2,7 @@
 
 TV Control is menu option **4**. Existing options 0–3 and both entry points remain available. The CLI uses English, matching POLTERHEIST. Use only receivers that you own or have authorization to control.
 
-The H1/H2/H3 extension adds read-only hardware diagnostics and multiprotocol discovery. See [research](tv_engine/RESEARCH.md), [architecture](tv_engine/ARCHITECTURE.md) and [validation/current limits](tv_engine/VALIDATION.md). Later milestones require user validation of this delivery. No new dependency installation or system configuration is required by these additions.
+The H1/H2/H3 extension adds read-only hardware diagnostics and multiprotocol discovery. H4 adds explicit Wi-Fi Direct discovery and WFD classification through Linux D-Bus APIs. See [H4 usage/validation](tv_engine/H4_VALIDATION.md) and [research](tv_engine/H4_RESEARCH.md). Miracast activation/receiver playback remain preparation only. No dependencies are installed or system configuration changed automatically.
 
 ## Install and run on Kali
 
@@ -34,6 +34,9 @@ POLTERHEIST/
     discovery_backends.py          # independent discovery adapter registry
     scopes.py                      # bounded, confirmed routed target scopes
     hardware.py                    # read-only Kali hardware diagnosis
+    p2p.py, wireless_bus.py         # physical adapters and Linux P2P D-Bus APIs
+    wireless.py, wfd.py             # bounded radio discovery and WFD evidence
+    wireless_cli.py, miracast.py    # manual radio UI, preparation, local presentation
     models.py, network.py           # configuration and local network scope
     manager.py                     # independent receiver workers
     media.py, http_server.py        # validation, conversion and HTTP Range
@@ -48,6 +51,7 @@ POLTERHEIST/
   reports/tv_control/tv_control.log # rotating technical log
   tests/test_tv_control.py
   tests/test_tv_engine.py           # H2/H3 fixtures and simulated DIAL receiver
+  tests/test_wireless_tv.py         # H4 labeled fixtures and state/cleanup tests
 ```
 
 User media, cache, local configuration and logs are excluded from Git. `media/` is created if missing. Only files immediately inside that directory are listed. URLs contain random tokens, not absolute paths. Symlinks outside approved directories are rejected. Selected file contents are revalidated when prepared; an extension alone does not establish the format. Images are decoded for validation, and videos are checked with ffprobe. Video corruption discovered during playback is reported by the receiver; probing is not a full-file video decode.
@@ -73,6 +77,8 @@ cp config/tv_control.example.json config/tv_control.json
 | `discovery_backends` | `["cast", "upnp", "airplay"]` | Enabled discovery adapters; `upnp` includes DLNA/DIAL, `airplay` includes RAOP. |
 | `directed_max_hosts` | `16` | Maximum explicit targets, configurable from 1 to 64; CIDR size is checked before expansion. |
 | `directed_workers` | `4` | Concurrent directed protocol probes, configurable from 1 to 8. |
+| `p2p_backend` | `"networkmanager"` | Explicit radio backend; alternative `"supplicant"`. Never auto-starts a scan. |
+| `p2p_timeout` | `15` | Requested finite P2P search duration, integer 1–60 seconds. |
 
 Configuration is read on first opening TV Control in the process. Restart after editing the file; the discovery menu can change enabled backends for the current session. Interface selection does not change network configuration. Multicast discovery and playback use one selected IPv4 LAN. Directed discovery accepts a confirmed small IPv4/hostname/CIDR scope and can inspect routed targets, which remain discovery-only outside that LAN. Each target receives one unicast SSDP search and a query to the known Cast device-information endpoint on port 8008. No arbitrary port ranges are scanned. Receivers that disable these mechanisms may still require multicast. Hostnames are resolved once and subsequent requests use pinned literal IPs. IPv6 in Bonjour records is retained as metadata; IPv6-only discovery/transport is not implemented.
 
@@ -92,7 +98,7 @@ Manufacturer/model fields remain unknown when absent. TV labels based on a model
 
 The registry merges matching protocol identities and provisionally groups same-IP cross-protocol observations, preserves IDs across rediscovery/IP changes when identities match, and marks missing receivers unavailable. Distinct same-protocol identities on one IP stay separate. Same-host grouping is explicitly unverified physical identity. A device advertising Cast and DLNA prefers Cast; intelligent correlation/fallback is deferred to H7. Each scan writes evidence, per-backend results, errors and timestamps to `reports/tv_control/discovery_*.json`.
 
-Choose **1** for all currently controllable receivers, or **2** and enter `1,3`. Empty input, invalid/duplicate IDs and unavailable/discovery-only receivers are rejected. **3** refreshes, **4** confirms an IP/hostname/CIDR scope, **5** inspects capability evidence, **6** runs hardware diagnostics, **7** configures discovery backends and **0** returns. No results preserves these retry/manual/back options. `--tv-diagnostics` also works independently when no LAN interface can be selected.
+Choose **1** for all currently controllable IP receivers, or **2** and enter `1,3`. Empty input, invalid/duplicate IDs and unavailable/discovery-only receivers are rejected. **3** refreshes IP, **4** confirms an IP/hostname/CIDR scope, **5** inspects evidence, **6** runs hardware diagnostics, **7** configures discovery backends, **8** starts separately confirmed Wi-Fi Direct discovery, **9** lists advertised WFD sinks, **10** prepares Miracast/local presentation and **0** returns. With no selected IPv4 interface, the radio/diagnostic menus remain usable and IP playback is unavailable. IP refresh preserves wireless observations; radio refresh affects only its selected interface.
 
 Selecting targets does not play anything. Choose **Image** or **Video**, then a numbered local file. Before every start or change of playback, including a single receiver, confirm the listed devices:
 
@@ -133,7 +139,9 @@ DLNA native repeat is preferred. Without it, a stopped transport is restarted on
 
 **Discovery only:** AirPlay/RAOP via Bonjour, DIAL via SSDP/description/Application-URL, and generic UPnP services. No app launch, PIN exchange, media command or video capability is inferred from these observations.
 
-**Planned, not implemented:** LG webOS/Samsung/Roku control, AirPlay/RAOP playback, direct wireless/Miracast and external controller integrations. Discovery adapters implement the small `DiscoveryBackend` contract; control adapters separately implement `protocols/base.py`. Unsupported operations must remain explicit. The CLI contains no direct Cast or SOAP calls.
+**Wireless discovery:** H4 uses existing NM/supplicant P2P APIs; a valid advertised WFD receiving role makes a Miracast candidate, not a connected session. Cached entries and source-only peers remain distinct. The Miracast preparation adapter reports dependencies and unapproved effects. Optional local ffplay presentation is explicitly local; no external casting process is started.
+
+**Planned, not implemented:** Miracast connection/receiver playback, LG webOS/Samsung/Roku control, AirPlay/RAOP playback and external controller integrations. Automatic IP discovery uses `DiscoveryBackend`; radio discovery has a separate explicit lifecycle so a LAN refresh cannot activate radios. Control adapters separately implement `protocols/base.py`. Unsupported operations remain explicit. The CLI contains no direct Cast or SOAP calls.
 
 ## Network and troubleshooting
 

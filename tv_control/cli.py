@@ -41,7 +41,12 @@ class Application:
     def __init__(self, root):
         self.root = Path(root)
         self.config = Config.load(root)
-        self.network = detect_network(self.config.bind_ip)
+        self.network_error = ""
+        try:
+            self.network = detect_network(self.config.bind_ip)
+        except RuntimeError as error:
+            self.network = None
+            self.network_error = str(error)
         self.discovery = Discovery(self.network, self.config)
         self.manager = Manager(root, self.network, self.config)
         self.handler = configure_logging(root)
@@ -49,8 +54,8 @@ class Application:
         self.source = None
 
     def show_devices(self):
-        print("\nUNIVERSAL TV DISCOVERY — H3")
-        print("  ID  DEVICE                    IP               PROTOCOL / STATUS")
+        print("\nUNIVERSAL TV DISCOVERY — IP / WIRELESS")
+        print("  ID  DEVICE                    ADDRESS           PROTOCOL / STATUS")
         print("  " + "-" * 85)
         for device in self.discovery.devices.values():
             e = device.primary
@@ -62,7 +67,16 @@ class Application:
                 if device.controllable
                 else "DISCOVERED ONLY"
             )
-            print(f"  {device.id:<3} {safe_text(e.name)[:25]:25} {e.ip:16} {protocols} / {state}")
+            address = e.ip or e.details.get("p2p_address", "Unknown")
+            if e.details.get("transport") == "p2p":
+                state = (
+                    e.details.get("classification", "P2P ONLY")
+                    if device.available
+                    else "UNAVAILABLE / CACHED"
+                )
+            print(
+                f"  {device.id:<3} {safe_text(e.name)[:25]:25} {safe_text(address):17} {protocols} / {state}"
+            )
             print(
                 f"      {safe_text(e.manufacturer)} | {safe_text(e.model)} | {safe_text(e.kind)} | port {e.port}"
             )
@@ -80,6 +94,10 @@ class Application:
         print(f"  [+] {count} devices/services detected (UPnP devices are not necessarily TVs)")
 
     def scan(self, target=None):
+        if self.network is None:
+            raise ValueError(
+                "No selected IPv4 LAN: " + self.network_error + "; use Wi-Fi Direct discovery"
+            )
         print(
             f"  Discovering on {safe_text(self.network.name)}: {self.network.ip} / {self.network.subnet} ..."
         )
@@ -144,6 +162,11 @@ class Application:
             )
             self.discovery.config = config
             print("  Discovery configuration updated for this session. Refresh to apply.")
+        print("  P2P backend: " + self.discovery.config.p2p_backend)
+        backend = input("  P2P backend: networkmanager / supplicant [ENTER to keep]: ").strip()
+        if backend:
+            self.discovery.config = replace(self.discovery.config, p2p_backend=backend)
+            print("  P2P discovery remains manual; no scan was started.")
 
     def targets(self):
         while True:
@@ -153,7 +176,9 @@ class Application:
                 "  [2] Connect to specific receivers\n  [3] Refresh discovery\n"
                 "  [4] Directed discovery by IP / hostname / CIDR\n"
                 "  [5] Inspect capabilities\n  [6] Hardware diagnostics\n"
-                "  [7] Configure discovery backends\n  [0] Back"
+                "  [7] Configure discovery backends\n  [8] Wi-Fi Direct discovery\n"
+                "  [9] Miracast receivers (WFD advertisements)\n"
+                "  [10] Prepare Miracast / local presentation\n  [0] Back"
             )
             choice = input("  > ").strip()
             try:
@@ -171,6 +196,14 @@ class Application:
                     run(self.root)
                 elif choice == "7":
                     self.configure_backends()
+                elif choice in ("8", "9", "10"):
+                    from . import wireless_cli
+
+                    {
+                        "8": wireless_cli.discover,
+                        "9": wireless_cli.receivers,
+                        "10": wireless_cli.prepare,
+                    }[choice](self)
                 elif choice in ("1", "2"):
                     ids = None
                     if choice == "2":
@@ -181,6 +214,9 @@ class Application:
                 else:
                     print("  Invalid option.")
             except (ValueError, RuntimeError, OSError) as error:
+                logging.getLogger(__name__).warning(
+                    "TV selection action %s failed: %s", choice, error
+                )
                 print("  [!] " + safe_text(error))
 
     def media(self):
@@ -299,7 +335,11 @@ class Application:
             if self.manager.sessions:
                 self.controls()
                 return
-            self.scan()
+            if self.network:
+                self.scan()
+            else:
+                print("  IP discovery unavailable: " + safe_text(self.network_error))
+                print("  Wi-Fi Direct discovery and hardware diagnostics remain available.")
             while True:
                 devices = self.targets()
                 if devices is None:

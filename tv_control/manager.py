@@ -167,7 +167,9 @@ class Manager:
     def __init__(self, root, network, config, backend_factory=None):
         self.network, self.config = network, config
         self.library = MediaLibrary(root, config)
-        self.server = MediaServer(network.ip, config.http_port, self.library.roots)
+        self.server = (
+            MediaServer(network.ip, config.http_port, self.library.roots) if network else None
+        )
         self.sessions = {}
         self.backend_factory = backend_factory or (lambda e, n, c: BACKENDS[e.protocol](e, n, c))
 
@@ -178,6 +180,8 @@ class Manager:
     def start(self, devices, source, confirmed=False):
         if not confirmed:
             raise ValueError("Explicit confirmation is required before every playback session")
+        if self.network is None:
+            raise ValueError("IP playback requires a selected local network")
         if not devices or any(not d.controllable for d in devices):
             raise ValueError("Select available devices with a playback backend")
         if len({d.id for d in devices}) != len(devices):
@@ -214,5 +218,5 @@ class Manager:
 
     def close(self):
         self.stop()
-        if not self.active:
+        if not self.active and self.server is not None:
             self.server.close()

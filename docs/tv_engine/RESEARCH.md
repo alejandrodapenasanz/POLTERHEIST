@@ -2,6 +2,8 @@
 
 Fecha de consulta: **11 de noviembre de 2026**. Entorno objetivo: Kali Linux Live en hardware físico. Este documento distingue especificaciones, implementaciones de sus autores e inferencias de diseño. Las afirmaciones de compatibilidad de proyectos externos no son pruebas realizadas en el laboratorio POLTERHEIST.
 
+Este documento conserva el alcance de H1. La continuación solicitada el **12-11-2026** implementa H4.1/H4.2 y prepara H4.3/H4.4: [investigación actualizada](H4_RESEARCH.md) y [estado/validación](H4_VALIDATION.md). La revisión actual encontró una API D-Bus Manager en GNOME Network Displays; su disponibilidad debe verificarse en la versión instalada de Kali.
+
 ## Conclusión y alcance de esta entrega
 
 No existe un transporte universal que permita emitir vídeo a cualquier TV cercana. Sin compartir punto de acceso hay tres rutas distintas: IP enrutada con autorización y conectividad, un enlace directo soportado por ambos extremos, o una pasarela del propietario. Descubrir un anuncio no establece ninguna de esas rutas ni concede permiso de control.

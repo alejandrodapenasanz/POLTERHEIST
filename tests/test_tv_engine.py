@@ -104,6 +104,8 @@ class HardwareTests(QuietTest):
             )
             if call[0] == "busctl":
                 self.assertIn("--auto-start=no", call)
+                self.assertIn("call", call)
+                self.assertNotIn("get-property", call)
 
     def test_missing_tools_leave_capabilities_unknown(self):
         report = hardware.collect(

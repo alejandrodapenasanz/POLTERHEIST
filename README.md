@@ -51,7 +51,9 @@ Kali `--setup` installs FFmpeg/ffprobe and the venv requirements (PyChromecast, 
 
 Run `.venv/bin/python script.py --tv-diagnostics` for read-only Kali hardware diagnostics, even without a LAN. It checks Wi-Fi/P2P, driver/chipset IDs, BlueZ, encoders and desktop capture prerequisites without scanning radios, pairing, capturing or changing system configuration.
 
-See **[H1 research and technology matrices](docs/tv_engine/RESEARCH.md)**, **[architecture](docs/tv_engine/ARCHITECTURE.md)**, **[H2/H3 usage and validation](docs/tv_engine/VALIDATION.md)** and **[TV Control guide](docs/TV_CONTROL.md)**. AirPlay/RAOP/DIAL additions are discovery only. Direct wireless/Miracast, vendor control and new media transports await validation of H2/H3. Automated tests use labeled fixtures and loopback simulators; physical Kali/TV compatibility remains unverified.
+TV Control now adds **8 — Wi-Fi Direct discovery**, **9 — Miracast receiver advertisements** and **10 — Miracast preparation/local presentation**. Linux discovery uses NetworkManager or an explicitly selected wpa_supplicant D-Bus backend, with adapter/PHY selection, a confirmed finite search and cleanup verification. It works without a shared router or selected IPv4 LAN when the hardware/APIs support P2P. A generic P2P peer is never classified as a WFD sink by name alone. No Miracast connection or receiver playback is claimed: external-stack activation remains pending review and physical validation.
+
+See **[H4 usage, dependencies, test record and Kali commands](docs/tv_engine/H4_VALIDATION.md)**, **[H4 research](docs/tv_engine/H4_RESEARCH.md)** and **[roadmap](ROADMAP.md)**. Earlier deliverables: [H1 matrices](docs/tv_engine/RESEARCH.md), [architecture](docs/tv_engine/ARCHITECTURE.md), [H2/H3 validation](docs/tv_engine/VALIDATION.md) and [TV Control guide](docs/TV_CONTROL.md). AirPlay/RAOP/DIAL remain discovery only. Automated tests use labeled fixtures and loopback simulators; physical Kali/TV compatibility remains unverified.
 
 ## Wi-Fi and WPS on Windows
 

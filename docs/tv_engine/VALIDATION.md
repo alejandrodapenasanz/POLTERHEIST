@@ -2,6 +2,8 @@
 
 Fecha: **11-11-2026**. Entrega: H1 investigado/documentado, H2 implementado y H3 implementado para descubrimiento IP. Entorno ejecutado: **Windows, Python 3.13**. No se ha ejecutado Kali físico ni probado una TV con esta ampliación. Ningún resultado simulado se incluye en el inventario de producción.
 
+Registro histórico de H2/H3. La tarea H4 posterior autorizó continuar el desarrollo: consultar [validación y límites de H4](H4_VALIDATION.md) para el estado actual y los nuevos comandos/menús. Las cifras y la puerta de revisión de este registro corresponden a aquella entrega.
+
 ## Entrega revisable
 
 | Hito / backend | Implementación entregada | Límite explícito |

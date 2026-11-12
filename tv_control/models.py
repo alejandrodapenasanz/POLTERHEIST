@@ -22,6 +22,8 @@ class Config:
     discovery_backends: tuple[str, ...] = ("cast", "upnp", "airplay")
     directed_max_hosts: int = 16
     directed_workers: int = 4
+    p2p_backend: str = "networkmanager"
+    p2p_timeout: int = 15
 
     def __post_init__(self):
         for name in ("discovery_timeout", "request_timeout", "connect_timeout", "poll_interval"):
@@ -58,6 +60,10 @@ class Config:
         ):
             raise ValueError("discovery_backends must contain unique names: cast, upnp, airplay")
         object.__setattr__(self, "discovery_backends", tuple(backends))
+        if self.p2p_backend not in ("networkmanager", "supplicant"):
+            raise ValueError("p2p_backend must be networkmanager or supplicant")
+        if type(self.p2p_timeout) is not int or not 1 <= self.p2p_timeout <= 60:
+            raise ValueError("p2p_timeout must be between 1 and 60 seconds")
 
     @classmethod
     def load(cls, root):

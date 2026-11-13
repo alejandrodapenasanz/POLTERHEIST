@@ -742,7 +742,7 @@ class IntegrationTests(QuietTest):
         self.addCleanup(app.close)
         self.assertIsNone(app.network)
         self.assertIsNone(app.manager.server)
-        with patch("builtins.input", return_value="0"):
+        with patch.object(app, "discover_all"), patch("builtins.input", return_value="0"):
             app.run()
         self.assertIn("Wi-Fi Direct", self.output.getvalue())
 

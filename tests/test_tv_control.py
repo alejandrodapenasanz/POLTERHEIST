@@ -24,7 +24,7 @@ from tv_control import cli, discovery, media, network
 from tv_control.http_server import MediaServer
 from tv_control.manager import Manager, Session
 from tv_control.models import Config, Device, Endpoint, PlaybackStatus, SessionLost, Unsupported
-from tv_control.protocols import airplay, dlna, google_cast
+from tv_control.protocols import airplay, coap, dlna, google_cast, iot_mdns, onvif
 from tv_control.protocols.base import Backend
 
 NETWORK = network.Network("fixture", "192.0.2.10", ipaddress.IPv4Network("192.0.2.0/24"))
@@ -257,6 +257,9 @@ class DiscoveryTests(QuietTest):
             patch.object(google_cast, "discover", side_effect=RuntimeError("mDNS failed")),
             patch.object(dlna, "discover", return_value=[endpoint(protocol="DLNA")]),
             patch.object(airplay, "discover", return_value=[]),
+            patch.object(iot_mdns, "discover", return_value=[]),
+            patch.object(onvif, "discover", return_value=[]),
+            patch.object(coap, "discover", return_value=[]),
         ):
             registry.scan()
         self.assertTrue(registry.devices[1].controllable)
@@ -902,7 +905,7 @@ class MenuTests(QuietTest):
             self.assertEqual(app.main([]), 0)
         for action in (profile, lan, wifi, portal, tv, cleanup):
             action.assert_called_once_with()
-        self.assertIn("[4] TV CONTROL", self.output.getvalue())
+        self.assertIn("[4] IoT SCANNING", self.output.getvalue())
 
     def test_direct_entry_and_multitarget_default_no(self):
         with patch.object(app, "tv_control", return_value=None) as tv:
@@ -919,6 +922,9 @@ class MenuTests(QuietTest):
         application.manager.sessions = {1: Mock()}
         application.selected = [device(1)]
         application.source = Path("video.mp4")
+        application.discover_all = Mock()
+        application.show_devices = Mock()
+        application.connections = Mock()
         return application
 
     def test_keep_running_return_stop_return_and_cancel(self):

@@ -10,8 +10,10 @@ from dataclasses import asdict
 from pathlib import Path
 
 from .discovery_backends import builtins
+from .iot import summary
 from .models import Device
 from .scopes import expand_scope, route_to
+from .security import assess
 
 LOG = logging.getLogger(__name__)
 
@@ -104,7 +106,7 @@ class Discovery:
         self.warnings = []
         self.results = []
         endpoints = []
-        with ThreadPoolExecutor(max_workers=3) as pool:
+        with ThreadPoolExecutor(max_workers=6) as pool:
             futures = {
                 pool.submit(self._probe, backend, self.network, target): backend.label
                 for backend in self.enabled()
@@ -119,7 +121,9 @@ class Discovery:
                 pool.shutdown(wait=False, cancel_futures=True)
                 raise
         if target is None:
-            return self.replace_scope(endpoints, lambda e: e.details.get("transport") != "p2p")
+            return self.replace_scope(
+                endpoints, lambda e: e.details.get("transport") not in ("p2p", "ble")
+            )
         return self.merge(endpoints, refresh=False)
 
     def replace_scope(self, endpoints, predicate):
@@ -178,7 +182,16 @@ class Discovery:
         found = []
         try:
             found = [
-                e for e in backend.discover(network, self.config, target) if network.accepts(e.ip)
+                e
+                for e in backend.discover(network, self.config, target)
+                if network.accepts(e.ip)
+                or (
+                    backend.key == "iot_mdns"
+                    and not target
+                    and not e.ip
+                    and e.details.get("transport") == "mdns_ipv6"
+                    and e.details.get("source_ip") == network.ip
+                )
             ][: self.config.max_devices]
             result.update(status="DETECTED" if found else "NO RESPONSE", count=len(found))
             for endpoint in found:
@@ -256,12 +269,18 @@ class Discovery:
             "enabled_backends": self.config.discovery_backends,
             "results": self.results,
             "warnings": self.warnings,
-            "devices": [asdict(device) for device in self.devices.values()],
+            "devices": [
+                {**asdict(device), "iot_summary": summary(device)}
+                for device in self.devices.values()
+            ],
             "limitations": [
                 "Discovery does not establish a media session or authenticate a receiver.",
                 "Same-IP grouping is provisional; physical identity correlation is deferred.",
-                "IPv4 transport; IPv6 addresses in Bonjour records are metadata only.",
+                "IP transport uses IPv4; IPv6 addresses in Bonjour records are metadata only. P2P and BLE are separate radio transports.",
+                "Only responding supported services are detected; silent/cloud-only devices are not exhaustively inventoried. Zigbee/Thread/Z-Wave/SDR adapters are not implemented.",
+                "TCP reachability does not establish credentials, pairing or permission to control an IoT device.",
             ],
+            "security_observations": [assess(device) for device in self.devices.values()],
         }
         path.write_text(
             json.dumps(

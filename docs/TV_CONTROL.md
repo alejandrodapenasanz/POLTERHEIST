@@ -1,12 +1,12 @@
 # TV Control
 
-TV Control is menu option **4**. Existing options 0–3 and both entry points remain available. The CLI uses English, matching POLTERHEIST. Use only receivers that you own or have authorization to control.
+Main menu option **4** is now **IoT Scanning** and starts LAN/P2P/BLE discovery automatically. Choose **5 — Media control** inside it for the TV functionality documented here. Existing main options 0–3 and both entry points remain available. `--iot-scan` and legacy `--tv-control` open the same IoT menu. See the [IoT guide](IOT_CONTROL.md). The CLI uses English, matching POLTERHEIST. Use only receivers that you own or have authorization to control.
 
-The H1/H2/H3 extension adds read-only hardware diagnostics and multiprotocol discovery. H4 adds explicit Wi-Fi Direct discovery and WFD classification through Linux D-Bus APIs. See [H4 usage/validation](tv_engine/H4_VALIDATION.md) and [research](tv_engine/H4_RESEARCH.md). Miracast activation/receiver playback remain preparation only. No dependencies are installed or system configuration changed automatically.
+The H1/H2/H3 extension adds read-only hardware diagnostics and multiprotocol discovery. H4 adds explicit Wi-Fi Direct discovery and WFD classification through Linux D-Bus APIs. See [H4 usage/validation](../ROADMAP.md#h4-validacion) and [research](../ROADMAP.md#h4-investigacion). Miracast activation/receiver playback remain preparation only. No dependencies are installed or system configuration changed automatically.
 
 ## Install and run on Kali
 
-From the repository root:
+From the repository root, `bash setup.sh` creates/reuses the Linux environment and runs the menu. Use `bash setup.sh --install-system` to explicitly include APT prerequisites or `bash setup.sh --run-only` for subsequent runs without installation. The manual equivalent for a new `.venv` is:
 
 ```bash
 sudo apt update
@@ -74,7 +74,7 @@ cp config/tv_control.example.json config/tv_control.json
 | `max_devices` | `32` | Discovery response cap, limited to 1–64 per protocol. |
 | `conversion_timeout` | `600` | Maximum seconds for each conversion, up to 7200. |
 | `auto_convert` | `true` | Convert when required. With `false`, report incompatible content without converting. |
-| `discovery_backends` | `["cast", "upnp", "airplay"]` | Enabled discovery adapters; `upnp` includes DLNA/DIAL, `airplay` includes RAOP. |
+| `discovery_backends` | `["cast", "upnp", "airplay", "iot_mdns", "onvif", "coap"]` | Enabled discovery adapters; custom older lists remain unchanged. |
 | `directed_max_hosts` | `16` | Maximum explicit targets, configurable from 1 to 64; CIDR size is checked before expansion. |
 | `directed_workers` | `4` | Concurrent directed protocol probes, configurable from 1 to 8. |
 | `p2p_backend` | `"networkmanager"` | Explicit radio backend; alternative `"supplicant"`. Never auto-starts a scan. |
@@ -84,7 +84,7 @@ Configuration is read on first opening TV Control in the process. Restart after 
 
 ## Discovery and selection
 
-Opening the feature queries `_googlecast._tcp.local.`, `_airplay._tcp.local.`, `_raop._tcp.local.` and SSDP device descriptions. These are active protocol queries, not passive radio listening. No playback occurs during discovery. Example only; names and IP addresses come from your receivers:
+Opening the feature shows the IoT menu. **Detect all IoT devices** queries enabled protocols, including `_googlecast._tcp.local.`, `_airplay._tcp.local.`, `_raop._tcp.local.` and SSDP device descriptions. These are active protocol queries, not passive radio listening. No playback occurs during discovery. The historical TV-only example below illustrates media endpoints; the current inventory also shows IoT types and connection options:
 
 ```text
 UNIVERSAL TV DISCOVERY — H3
@@ -98,7 +98,7 @@ Manufacturer/model fields remain unknown when absent. TV labels based on a model
 
 The registry merges matching protocol identities and provisionally groups same-IP cross-protocol observations, preserves IDs across rediscovery/IP changes when identities match, and marks missing receivers unavailable. Distinct same-protocol identities on one IP stay separate. Same-host grouping is explicitly unverified physical identity. A device advertising Cast and DLNA prefers Cast; intelligent correlation/fallback is deferred to H7. Each scan writes evidence, per-backend results, errors and timestamps to `reports/tv_control/discovery_*.json`.
 
-Choose **1** for all currently controllable IP receivers, or **2** and enter `1,3`. Empty input, invalid/duplicate IDs and unavailable/discovery-only receivers are rejected. **3** refreshes IP, **4** confirms an IP/hostname/CIDR scope, **5** inspects evidence, **6** runs hardware diagnostics, **7** configures discovery backends, **8** starts separately confirmed Wi-Fi Direct discovery, **9** lists advertised WFD sinks, **10** prepares Miracast/local presentation and **0** returns. With no selected IPv4 interface, the radio/diagnostic menus remain usable and IP playback is unavailable. IP refresh preserves wireless observations; radio refresh affects only its selected interface.
+Within **Media control**, choose **1** for all currently controllable IP receivers, or **2** and enter `1,3`. Empty input, invalid/duplicate IDs and unavailable/discovery-only receivers are rejected. **3** refreshes IP, **4** confirms an IP/hostname/CIDR scope, **5** inspects evidence, **6** runs hardware diagnostics, **7** configures discovery backends, **8** starts separately confirmed Wi-Fi Direct discovery, **9** lists advertised WFD sinks, **10** prepares Miracast/local presentation and **0** returns. With no selected IPv4 interface, the radio/diagnostic menus remain usable and IP playback is unavailable. IP refresh preserves wireless observations; radio refresh affects only its selected interface.
 
 Selecting targets does not play anything. Choose **Image** or **Video**, then a numbered local file. Before every start or change of playback, including a single receiver, confirm the listed devices:
 

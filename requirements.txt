@@ -5,3 +5,5 @@ scapy==2.7.0
 PyChromecast==14.1.1
 zeroconf==0.154.0
 ifaddr==0.2.0
+# Bluetooth LE scanning/GATT on Windows 11 or Linux with BlueZ >= 5.55.
+bleak==3.1.0

@@ -3906,7 +3906,11 @@ def run_main(argv=None):
     parser.add_argument("--portal-choice", choices=("1", "2"), help=argparse.SUPPRESS)
     parser.add_argument("--portal", action="store_true", help="Open the captive portal wizard")
     parser.add_argument(
-        "--tv-control", action="store_true", help="Open local TV discovery and media casting"
+        "--iot-scan",
+        "--tv-control",
+        dest="tv_control",
+        action="store_true",
+        help="Open IoT scanning, connection options and media control (--tv-control is an alias)",
     )
     parser.add_argument(
         "--tv-diagnostics",
@@ -3952,7 +3956,7 @@ def run_main(argv=None):
         or options.ssid
         or options.bssid
     ):
-        parser.error("Run TV Control separately from portal/wireless workflows.")
+        parser.error("Run IoT Scanning separately from portal/wireless workflows.")
     if options.portal_choice:
         options.portal = True
     if (options.portal or options.portal_preview) and (
@@ -4053,7 +4057,7 @@ def run_main(argv=None):
     while True:
         print(
             tint(
-                "\n[0] WHO AM I?\n[1] LAN RECON\n[2] WIRELESS RECON\n[3] CAPTIVE PORTAL\n[4] TV CONTROL — Smart TV Discovery & Media Casting\n\n[q] EXIT"
+                "\n[0] WHO AM I?\n[1] LAN RECON\n[2] WIRELESS RECON\n[3] CAPTIVE PORTAL\n[4] IoT SCANNING — Discovery & Control\n\n[q] EXIT"
             )
         )
         try:

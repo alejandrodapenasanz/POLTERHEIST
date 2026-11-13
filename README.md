@@ -1,13 +1,13 @@
 # POLTERHEIST
 
-Inventory and assessment for networks you own or are authorized to test: **LAN reconnaissance on Kali/Linux, Wi-Fi/WPS on Linux and Windows, a captive portal on Kali/Linux, and local TV media casting**. Menus, diagnostics, report explanations, and the portal page are in English.
+Inventory and assessment for networks you own or are authorized to test: **LAN reconnaissance on Kali/Linux, Wi-Fi/WPS on Linux and Windows, a captive portal on Kali/Linux, and IoT discovery with media control**. Menus, diagnostics, report explanations, and the portal page are in English.
 
 ```text
 [0] WHO AM I?
 [1] LAN RECON
 [2] WIRELESS RECON
 [3] CAPTIVE PORTAL
-[4] TV CONTROL — Smart TV Discovery & Media Casting
+[4] IoT SCANNING — Discovery & Control
 
 [q] EXIT
 ```
@@ -21,12 +21,19 @@ Boot Kali, connect to your Wi-Fi, and open the repository. Python **3.11 or newe
 ```bash
 git clone https://github.com/alejandrodapenasanz/POLTERHEIST.git
 cd POLTERHEIST
-python3 script.py --setup
-.venv/bin/python script.py --check
-.venv/bin/python script.py --wireless
+bash setup.sh
 ```
 
-The script detects Windows/Linux and reads `/etc/os-release` to identify Kali. Setup installs Linux tools with APT, includes `firmware-mediatek` on Kali, and creates a virtual environment with Scapy 2.7.0 without changing system Python. An environment copied from the other OS is preserved; setup uses `.venv-linux` or `.venv-windows` instead and prints the executable path. Installation needs Internet access. Firmware updates may require a reboot.
+`setup.sh` creates or reuses a Linux virtual environment, installs `requirements.txt` with that environment's Python, and starts the menu. It works when invoked from another directory, preserves Windows environments and prints the chosen interpreter. No activation/deactivation or `sudo pip` is needed. Python dependencies require Internet access on first installation.
+
+```bash
+bash setup.sh --install-system       # Also install APT prerequisites, including BlueZ/FFmpeg
+bash setup.sh --no-run               # Prepare without starting the application
+bash setup.sh --run-only             # Subsequent runs; no installation
+bash setup.sh --run-only -- --iot-scan
+```
+
+Run the installer as your normal user. Only `--install-system` invokes sudo for APT. If `python3-venv` is missing, use that option or install it explicitly. Workflows requiring root must use the exact venv interpreter printed by setup, for example `sudo -- "$(pwd)/venv/bin/python" script.py`. The older `python3 script.py --setup` remains available with its existing platform/firmware setup behavior. The manual examples below use `.venv`; substitute `venv`, `.venv-linux` or the path actually printed by setup.
 
 Wireless assessment requests `sudo` automatically when needed, preserving the virtual environment interpreter. It uses the **connected SSID**, discovers its BSSIDs, runs the original fingerprint detector, and displays **one `WIRELESS RESULTS` table** with `ASSESSMENT` on the right. Other observed networks remain `NOT_TESTED`.
 
@@ -41,9 +48,17 @@ To specify another authorized network or restrict assessment to one BSSID:
 
 Without a connected network or `--ssid`, discovery runs without active fingerprinting. Each BSSID receives its own result; assessments are not copied between radios sharing an SSID.
 
-## TV Control
+## IoT Scanning
 
-Choose **4**, or run `.venv/bin/python script.py --tv-control`. Discovery includes **Google Cast, DLNA/UPnP, DIAL, AirPlay and RAOP**, with separate evidence for advertisements, reachability and playback support. Directed discovery accepts a confirmed IPv4, hostname or small CIDR, including routed networks. Playback remains Cast/DLNA on the selected LAN and requires explicit confirmation for every session, including a single receiver.
+Choose **4**, or run the venv's Python with `script.py --iot-scan` (`--tv-control` remains an alias). Entering **IoT Scanning** automatically surveys the selected LAN, eligible Wi-Fi Direct radios and Bluetooth LE adapters. After the survey it shows a table with IDs, names, advertised types, addresses and connection availability, followed by **1 — Connect to all detected devices** and **2 — Connect to selected devices (IDs separated by commas)**, for example `1,3,5`.
+
+LAN discovery includes Cast, DLNA/UPnP/DIAL, AirPlay/RAOP, IoT DNS-SD, ONVIF and CoAP. DNS-SD covers HomeKit/Matter, Shelly/ESPHome, hubs, printers, MQTT and web services. Wi-Fi Direct uses Linux D-Bus; BLE uses Bleak on Linux/Windows. Missing dependencies, permissions or radios are reported independently. This does not discover every silent device, isolated network or RF family; Zigbee/Thread/Z-Wave/SDR adapters remain pending.
+
+`YES*` means a connection adapter is implemented and acceptance must still be tested. `LIMITED*` means only MQTT handshake/TCP verification, which closes afterwards; it does not mean authenticated control. `NO` means unsupported or stale. BLE/Cast sessions are kept until disconnected, while DLNA reports protocol readiness. Connecting does not start playback or issue actuator commands.
+
+**3** rescans; **4** inspects an ID; **5** opens media control; **6** checks TCP; **9** disconnects IoT sessions; **10** checks MQTT without publishing/subscribing; **11** reports exposure without claiming a CVE. Disconnect BLE sessions before rescanning BLE. Custom LAN backend selections are preserved and can be changed with **8**. See the [IoT guide and validation](docs/IOT_CONTROL.md) and the single [IoT / RF / TV roadmap](ROADMAP.md).
+
+Directed discovery accepts a confirmed IPv4, hostname or small CIDR, including routed networks. Playback remains Cast/DLNA on the selected LAN and requires explicit confirmation for every session, including a single receiver.
 
 Put PNG/JPEG/WEBP images and MP4/MKV/MOV/WEBM videos in **this repository's `media/` directory**, not the operating system's `/media`. FFprobe validates the content and codecs. Cast images become cached 720p H.264 MP4 clips; compatible videos play directly and other videos use conservative conversion. DLNA uses advertised generic image/MP4 formats; unsupported or profile-specific formats are reported explicitly. Playback repeats, with independent status, pause, resume, stop, media changes and target changes. Devices must be owned by you or authorized for control.
 
@@ -51,9 +66,9 @@ Kali `--setup` installs FFmpeg/ffprobe and the venv requirements (PyChromecast, 
 
 Run `.venv/bin/python script.py --tv-diagnostics` for read-only Kali hardware diagnostics, even without a LAN. It checks Wi-Fi/P2P, driver/chipset IDs, BlueZ, encoders and desktop capture prerequisites without scanning radios, pairing, capturing or changing system configuration.
 
-TV Control now adds **8 — Wi-Fi Direct discovery**, **9 — Miracast receiver advertisements** and **10 — Miracast preparation/local presentation**. Linux discovery uses NetworkManager or an explicitly selected wpa_supplicant D-Bus backend, with adapter/PHY selection, a confirmed finite search and cleanup verification. It works without a shared router or selected IPv4 LAN when the hardware/APIs support P2P. A generic P2P peer is never classified as a WFD sink by name alone. No Miracast connection or receiver playback is claimed: external-stack activation remains pending review and physical validation.
+The **Media control submenu** preserves **8 — Wi-Fi Direct discovery**, **9 — Miracast receiver advertisements** and **10 — Miracast preparation/local presentation**. Linux discovery uses NetworkManager or an explicitly selected wpa_supplicant D-Bus backend, with adapter/PHY selection, a confirmed finite search and cleanup verification. It does not require a shared router or selected IPv4 LAN when the hardware/APIs support P2P. A generic P2P peer is never classified as a WFD sink by name alone. No Miracast connection or receiver playback is claimed: external-stack activation remains pending review and physical validation.
 
-See **[H4 usage, dependencies, test record and Kali commands](docs/tv_engine/H4_VALIDATION.md)**, **[H4 research](docs/tv_engine/H4_RESEARCH.md)** and **[roadmap](ROADMAP.md)**. Earlier deliverables: [H1 matrices](docs/tv_engine/RESEARCH.md), [architecture](docs/tv_engine/ARCHITECTURE.md), [H2/H3 validation](docs/tv_engine/VALIDATION.md) and [TV Control guide](docs/TV_CONTROL.md). AirPlay/RAOP/DIAL remain discovery only. Automated tests use labeled fixtures and loopback simulators; physical Kali/TV compatibility remains unverified.
+See **[H4 usage, dependencies, test record and Kali commands](ROADMAP.md#h4-validacion)**, **[H4 research](ROADMAP.md#h4-investigacion)** and **[roadmap](ROADMAP.md)**. Earlier deliverables: [H1 matrices](ROADMAP.md#h1-investigacion), [architecture](ROADMAP.md#arquitectura), [H2/H3 validation](ROADMAP.md#h2-h3-validacion) and [TV Control guide](docs/TV_CONTROL.md). AirPlay/RAOP/DIAL remain discovery only. Automated tests use labeled fixtures and loopback simulators; physical Kali/TV compatibility remains unverified.
 
 ## Wi-Fi and WPS on Windows
 

@@ -9,9 +9,10 @@
   "max_devices": 32,
   "conversion_timeout": 600,
   "auto_convert": true,
-  "discovery_backends": ["cast", "upnp", "airplay"],
+  "discovery_backends": ["cast", "upnp", "airplay", "iot_mdns", "onvif", "coap"],
   "directed_max_hosts": 16,
   "directed_workers": 4,
   "p2p_backend": "networkmanager",
-  "p2p_timeout": 15
+  "p2p_timeout": 15,
+  "ble_timeout": 8
 }

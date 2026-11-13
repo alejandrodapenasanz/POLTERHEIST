@@ -1,6 +1,8 @@
 .venv/
 .venv-linux/
 .venv-windows/
+venv/
+venv-linux/
 __pycache__/
 *.py[cod]
 .ruff_cache/

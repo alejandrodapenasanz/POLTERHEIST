@@ -19,11 +19,12 @@ class Config:
     max_devices: int = 32
     conversion_timeout: float = 600
     auto_convert: bool = True
-    discovery_backends: tuple[str, ...] = ("cast", "upnp", "airplay")
+    discovery_backends: tuple[str, ...] = ("cast", "upnp", "airplay", "iot_mdns", "onvif", "coap")
     directed_max_hosts: int = 16
     directed_workers: int = 4
     p2p_backend: str = "networkmanager"
     p2p_timeout: int = 15
+    ble_timeout: float = 8
 
     def __post_init__(self):
         for name in ("discovery_timeout", "request_timeout", "connect_timeout", "poll_interval"):
@@ -55,15 +56,27 @@ class Config:
         if (
             not isinstance(backends, (tuple, list))
             or not backends
-            or any(not isinstance(b, str) or b not in ("cast", "upnp", "airplay") for b in backends)
+            or any(
+                not isinstance(b, str)
+                or b not in ("cast", "upnp", "airplay", "iot_mdns", "onvif", "coap")
+                for b in backends
+            )
             or len(backends) != len(set(backends))
         ):
-            raise ValueError("discovery_backends must contain unique names: cast, upnp, airplay")
+            raise ValueError(
+                "discovery_backends must contain unique names: cast, upnp, airplay, iot_mdns, onvif, coap"
+            )
         object.__setattr__(self, "discovery_backends", tuple(backends))
         if self.p2p_backend not in ("networkmanager", "supplicant"):
             raise ValueError("p2p_backend must be networkmanager or supplicant")
         if type(self.p2p_timeout) is not int or not 1 <= self.p2p_timeout <= 60:
             raise ValueError("p2p_timeout must be between 1 and 60 seconds")
+        if (
+            isinstance(self.ble_timeout, bool)
+            or not isinstance(self.ble_timeout, (int, float))
+            or not 0.1 <= self.ble_timeout <= 60
+        ):
+            raise ValueError("ble_timeout must be between 0.1 and 60 seconds")
 
     @classmethod
     def load(cls, root):

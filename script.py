@@ -28,6 +28,8 @@ from contextlib import contextmanager
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
+from terminal_ui import AnimatedMenu, animation_available
+
 VERSION = "2.6.0"
 BASE = Path(__file__).resolve().parent
 PROFILE_PATH = BASE / "config" / "profile.json"
@@ -3879,6 +3881,9 @@ def run_main(argv=None):
     )
     parser.add_argument("--version", action="version", version="POLTERHEIST " + VERSION)
     parser.add_argument(
+        "--no-animation", action="store_true", help="Use the static main menu without animation"
+    )
+    parser.add_argument(
         "--check", action="store_true", help="Local diagnostics; does not scan the network"
     )
     parser.add_argument(
@@ -4014,8 +4019,16 @@ def run_main(argv=None):
         except (OSError, ValueError, RuntimeError) as error:
             print("  Detector: " + str(error))
         return 0
-    print(tint(BANNER))
-    print(tint(f"  POLTERHEIST :: WATCHING THE WIRE :: v{VERSION}", AMBER))
+    menu = None
+    if not any((options.tv_control, options.portal, options.portal_preview, options.wireless)):
+        if animation_available(options.no_animation):
+            try:
+                menu = AnimatedMenu(BANNER, VERSION)
+            except ImportError:
+                pass  # Static menu remains usable before requirements are updated.
+    if menu is None:
+        print(tint(BANNER))
+        print(tint(f"  POLTERHEIST :: WATCHING THE WIRE :: v{VERSION}", AMBER))
     if options.tv_control:
         try:
             return tv_control() or 0
@@ -4055,13 +4068,14 @@ def run_main(argv=None):
                 except (KeyboardInterrupt, EOFError):
                     pass
     while True:
-        print(
-            tint(
-                "\n[0] WHO AM I?\n[1] LAN RECON\n[2] WIRELESS RECON\n[3] CAPTIVE PORTAL\n[4] IoT SCANNING — Discovery & Control\n\n[q] EXIT"
+        if menu is None:
+            print(
+                tint(
+                    "\n[0] WHO AM I?\n[1] LAN RECON\n[2] WIRELESS RECON\n[3] CAPTIVE PORTAL\n[4] IoT SCANNING — Discovery & Control\n\n[q] EXIT"
+                )
             )
-        )
         try:
-            choice = input("  > ").strip().lower()
+            choice = menu.read_choice() if menu is not None else input("  > ").strip().lower()
         except (KeyboardInterrupt, EOFError):
             print("\n  Goodbye.")
             return 0

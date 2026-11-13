@@ -12,9 +12,25 @@ Inventory and assessment for networks you own or are authorized to test: **LAN r
 [q] EXIT
 ```
 
-The application entry point and existing workflows live in **`script.py`**, organized into functions. `POLTERHEIST.py` is a compatibility entry point. The independent **`tv_control/`** package provides media discovery and playback. The external detector remains in `vendor/` to preserve its original code, license, and provenance.
+Start the application with **`POLTERHEIST.py`** (uppercase on Linux). It automatically uses the Linux virtual environment prepared by `setup.sh`. The application workflows live in **`script.py`**, organized into functions. The independent **`tv_control/`** package provides media discovery and playback. The external detector remains in `vendor/` to preserve its original code, license, and provenance.
 
-## Kali installation
+## Animated main menu
+
+The original ghost floats and its tail ripples while the main menu waits for input. The six-second loop runs at 12 frames per second, with the title, options and input cursor staying in place. Type an option and press ENTER as before; editing, Backspace, Ctrl+C and Ctrl+D remain available. The animation stops when a workflow opens and returns with the main menu. [Animated preview](docs/ghost-menu.gif).
+
+`setup.sh` installs `prompt_toolkit` from `requirements.txt`. This library coordinates redraws and keyboard input on Linux and Windows. The logo is rendered as Unicode Braille dots, with an ASCII fallback for older output encodings. Small terminals give priority to the menu and restore the ghost when enlarged. Redirected input/output, `TERM=dumb`, or a missing UI dependency use the static menu. `NO_COLOR=1` keeps the animation monochrome.
+
+To disable motion:
+
+```bash
+python3 POLTERHEIST.py --no-animation
+# Or for all launches from this shell:
+export POLTERHEIST_NO_ANIMATION=1
+```
+
+Implementation references: [Codex's animated logo and stable cursor placement](https://github.com/openai/codex/pull/46752), [prompt_toolkit layouts and input](https://python-prompt-toolkit.readthedocs.io/en/stable/pages/full_screen_apps.html). POLTERHEIST animates its own existing artwork.
+
+## Linux installation (Kali/Debian/Ubuntu)
 
 Boot Kali, connect to your Wi-Fi, and open the repository. Python **3.11 or newer** is required.
 
@@ -22,18 +38,22 @@ Boot Kali, connect to your Wi-Fi, and open the repository. Python **3.11 or newe
 git clone https://github.com/alejandrodapenasanz/POLTERHEIST.git
 cd POLTERHEIST
 bash setup.sh
+python3 POLTERHEIST.py
 ```
 
-`setup.sh` creates or reuses a Linux virtual environment, installs `requirements.txt` with that environment's Python, and starts the menu. It works when invoked from another directory, preserves Windows environments and prints the chosen interpreter. No activation/deactivation or `sudo pip` is needed. Python dependencies require Internet access on first installation.
+`setup.sh` installs the required APT tools (including Python/venv, NetworkManager, BlueZ and FFmpeg), creates or reuses a Linux virtual environment, installs **all of `requirements.txt`** with that environment's Python, and checks dependency compatibility. In a terminal it then opens a **Bash session inside the repository with the venv already activated**: the prompt shows the environment name, and `python`, `python3` and `pip` use that environment. You can immediately run `python3 POLTERHEIST.py`. The installer works from another directory and preserves Windows environments. Installation requires Internet access and APT may request your sudo password.
+
+Both `bash setup.sh` and `sudo bash setup.sh` support this flow. With sudo, the venv and prepared session run as the original user. Because an executed script cannot change its parent shell, activation lives in the new Bash session; `exit` returns to your previous shell, and `deactivate` disables the venv in the prepared session. This session loads the venv activation script as its Bash startup file. In a later terminal, `python3 POLTERHEIST.py` still selects the installed environment automatically, or you can use the `source .../bin/activate` command printed by non-interactive setup.
 
 ```bash
-bash setup.sh --install-system       # Also install APT prerequisites, including BlueZ/FFmpeg
-bash setup.sh --no-run               # Prepare without starting the application
-bash setup.sh --run-only             # Subsequent runs; no installation
-bash setup.sh --run-only -- --iot-scan
+bash setup.sh --skip-system          # Only Python dependencies; system tools already installed
+bash setup.sh --no-shell             # Install and exit; useful for automation
+bash setup.sh --run                  # Install and open the menu immediately
+python3 POLTERHEIST.py --iot-scan     # Subsequent runs; no installation
+bash setup.sh --run-only -- --iot-scan # Equivalent launch through setup.sh
 ```
 
-Run the installer as your normal user. Only `--install-system` invokes sudo for APT. If `python3-venv` is missing, use that option or install it explicitly. Workflows requiring root must use the exact venv interpreter printed by setup, for example `sudo -- "$(pwd)/venv/bin/python" script.py`. The older `python3 script.py --setup` remains available with its existing platform/firmware setup behavior. The manual examples below use `.venv`; substitute `venv`, `.venv-linux` or the path actually printed by setup.
+Run the installer as your normal user; it elevates APT only. Root shells are also supported. `--install-system` and `--no-run` remain accepted and describe the defaults (install system dependencies, do not start the application). Without a terminal, setup exits after installation; `--shell` explicitly opens an activated session even with redirected input/output. On distributions without APT, install the system tools using your package manager, then use `--skip-system`. Workflows requiring root can use `sudo python3 POLTERHEIST.py`, which also selects the project environment. The older `python3 script.py --setup` remains available with its existing platform/firmware setup behavior. The manual examples below use `.venv`; substitute `venv`, `.venv-linux` or the path actually printed by setup.
 
 Wireless assessment requests `sudo` automatically when needed, preserving the virtual environment interpreter. It uses the **connected SSID**, discovers its BSSIDs, runs the original fingerprint detector, and displays **one `WIRELESS RESULTS` table** with `ASSESSMENT` on the right. Other observed networks remain `NOT_TESTED`.
 
@@ -68,7 +88,7 @@ Run `.venv/bin/python script.py --tv-diagnostics` for read-only Kali hardware di
 
 The **Media control submenu** preserves **8 — Wi-Fi Direct discovery**, **9 — Miracast receiver advertisements** and **10 — Miracast preparation/local presentation**. Linux discovery uses NetworkManager or an explicitly selected wpa_supplicant D-Bus backend, with adapter/PHY selection, a confirmed finite search and cleanup verification. It does not require a shared router or selected IPv4 LAN when the hardware/APIs support P2P. A generic P2P peer is never classified as a WFD sink by name alone. No Miracast connection or receiver playback is claimed: external-stack activation remains pending review and physical validation.
 
-See **[H4 usage, dependencies, test record and Kali commands](ROADMAP.md#h4-validacion)**, **[H4 research](ROADMAP.md#h4-investigacion)** and **[roadmap](ROADMAP.md)**. Earlier deliverables: [H1 matrices](ROADMAP.md#h1-investigacion), [architecture](ROADMAP.md#arquitectura), [H2/H3 validation](ROADMAP.md#h2-h3-validacion) and [TV Control guide](docs/TV_CONTROL.md). AirPlay/RAOP/DIAL remain discovery only. Automated tests use labeled fixtures and loopback simulators; physical Kali/TV compatibility remains unverified.
+See the **[ordered roadmap](ROADMAP.md)** for Kali validation and subsequent development, and the [TV Control guide](docs/TV_CONTROL.md) for usage and physical test procedures. AirPlay/RAOP/DIAL remain discovery only. Automated tests use labeled fixtures and loopback simulators; physical Kali/TV compatibility remains unverified.
 
 ## Wi-Fi and WPS on Windows
 

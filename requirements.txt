@@ -7,3 +7,5 @@ zeroconf==0.154.0
 ifaddr==0.2.0
 # Bluetooth LE scanning/GATT on Windows 11 or Linux with BlueZ >= 5.55.
 bleak==3.1.0
+# Animated main menu with coordinated keyboard input on Linux and Windows.
+prompt_toolkit==3.0.53

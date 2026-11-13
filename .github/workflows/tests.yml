@@ -30,8 +30,8 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y nmap ffmpeg
       - name: Lint and format
         run: |
-          ruff check script.py POLTERHEIST.py tv_control tests
-          ruff format --check script.py POLTERHEIST.py tv_control tests
+          ruff check script.py POLTERHEIST.py terminal_ui.py tv_control tests
+          ruff format --check script.py POLTERHEIST.py terminal_ui.py tv_control tests
       - name: Offline regressions and loopback Nmap integration
         run: python -m unittest discover -s tests -v
   kali:
@@ -46,11 +46,12 @@ jobs:
         run: apt-get update && apt-get install -y python3 git ca-certificates
       - uses: actions/checkout@v4
       - name: Install through POLTERHEIST setup
-        run: python3 script.py --setup
+        run: bash setup.sh --no-shell
       - name: Verify Kali detection and dependencies
         run: |
-          .venv/bin/python -c "import script; assert script.operating_system()['id'] == 'kali'; script.require_tools('iw', 'ip', 'nmcli', 'tcpdump', 'nmap'); script.load_upstream()"
+          venv/bin/python -c "import script, scapy, pychromecast, zeroconf, ifaddr, bleak; assert script.operating_system()['id'] == 'kali'; script.require_tools('iw', 'ip', 'nmcli', 'tcpdump', 'nmap', 'ffmpeg', 'ffprobe', 'bluetoothctl'); script.load_upstream()"
           nmap --version
-          .venv/bin/python script.py --check
+          python3 POLTERHEIST.py --check
+          python3 POLTERHEIST.py --version
       - name: Offline regressions on Kali
-        run: .venv/bin/python -m unittest discover -s tests -v
+        run: venv/bin/python -m unittest discover -s tests -v

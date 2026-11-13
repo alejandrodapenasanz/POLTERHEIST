@@ -49,7 +49,7 @@ La clasificación nueva usa categorías/servicios anunciados, no palabras como �
 | Wi-Fi Direct | Backend Linux NM/supplicant; P2P/WFD H4. Se intenta una interfaz elegible por PHY durante el análisis inicial. Conexión Miracast pendiente. |
 | Bluetooth LE | Bleak 3.1.0, escaneo finito por adaptador Linux o adaptador predeterminado Windows. Dirección, RSSI, manufacturer data y UUIDs anunciados. Las direcciones privadas pueden rotar; no se fusionan por nombre. |
 
-El análisis consulta las fuentes soportadas/habilitadas del ámbito. No cubre todos los equipos silenciosos, cloud-only, Zigbee, Thread, Z-Wave, RF arbitraria o VLANs aisladas. El único plan de expansión, con las tareas abiertas y los históricos TV/Miracast, está en [ROADMAP.md](../ROADMAP.md#plan-iot).
+El análisis consulta las fuentes soportadas/habilitadas del ámbito. No cubre todos los equipos silenciosos, cloud-only, Zigbee, Thread, Z-Wave, RF arbitraria o VLANs aisladas. El orden de validación en Kali y desarrollo posterior está en [ROADMAP.md](../ROADMAP.md).
 
 ## Conectividad y seguridad
 

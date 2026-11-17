@@ -314,7 +314,11 @@ class DLNA(Backend):
         ET.SubElement(item, "upnp:class").text = (
             "object.item.imageItem.photo" if media.image else "object.item.videoItem"
         )
-        ET.SubElement(item, "res", {"protocolInfo": f"http-get:*:{media.mime}:*"}).text = url
+        profile = getattr(media, "dlna_profile", "")
+        features = f"DLNA.ORG_PN={profile};DLNA.ORG_OP=01;DLNA.ORG_CI=0" if profile else "*"
+        ET.SubElement(
+            item, "res", {"protocolInfo": f"http-get:*:{media.mime}:{features}"}
+        ).text = url
         self.url = url
         self.previous_position = 0
         self.duration = media.duration

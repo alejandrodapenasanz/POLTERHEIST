@@ -276,7 +276,8 @@ class Application:
                 "  [5] Inspect capabilities\n  [6] Hardware diagnostics\n"
                 "  [7] Configure discovery backends\n  [8] Wi-Fi Direct discovery\n"
                 "  [9] Miracast receivers (WFD advertisements)\n"
-                "  [10] Prepare Miracast / local presentation\n  [0] Back"
+                "  [10] Prepare Miracast / local presentation\n"
+                "  [11] TV Payload (detect / send / execute)\n  [0] Back"
             )
             choice = input("  > ").strip()
             try:
@@ -284,6 +285,8 @@ class Application:
                     return None
                 if choice == "3":
                     self.scan()
+                elif choice == "11":
+                    self.payload()
                 elif choice == "4":
                     self.directed()
                 elif choice == "5":
@@ -318,6 +321,11 @@ class Application:
                     "TV selection action %s failed: %s", choice, error
                 )
                 print("  [!] " + safe_text(error))
+
+    def payload(self):
+        from .payload import run
+
+        run(self.root)
 
     def media(self):
         while True:
@@ -386,7 +394,8 @@ class Application:
             )
             print(
                 "  [1] Playback status\n  [2] Pause\n  [3] Resume\n  [4] Stop playback\n"
-                "  [5] Change media\n  [6] Change target receivers\n  [7] Refresh device status\n  [0] Back"
+                "  [5] Change media\n  [6] Change target receivers\n  [7] Refresh device status\n"
+                "  [8] TV Payload (detect / send / execute)\n  [0] Back"
             )
             choice = input("  > ").strip()
             try:
@@ -423,6 +432,8 @@ class Application:
                     devices = self.targets()
                     if devices:
                         self.start(devices, self.source or self.media())
+                elif choice == "8":
+                    self.payload()
                 else:
                     print("  Invalid option.")
             except (ValueError, RuntimeError, OSError) as error:
@@ -452,7 +463,8 @@ class Application:
                     "  [8] Configure discovery backends\n"
                     "  [9] Disconnect IoT connections\n"
                     "  [10] Check MQTT session access\n"
-                    "  [11] Security observations\n  [0] Back"
+                    "  [11] Security observations\n"
+                    "  [12] TV Payload (detect / send / execute)\n  [0] Back"
                 )
                 choice = input("  > ").strip()
                 try:
@@ -499,6 +511,8 @@ class Application:
                         self.check_mqtt()
                     elif choice == "11":
                         self.security_report()
+                    elif choice == "12":
+                        self.payload()
                     else:
                         print("  Invalid option.")
                 except (ValueError, RuntimeError, OSError) as error:

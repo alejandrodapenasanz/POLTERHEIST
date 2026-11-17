@@ -63,6 +63,7 @@ class Media:
     duration: float = 0
     video: dict = None
     audio: tuple = ()
+    dlna_profile: str = ""
 
 
 def confined(path, roots):
@@ -107,6 +108,11 @@ class MediaLibrary:
 
     def _run(self, binary, arguments, timeout):
         executable = shutil.which(binary)
+        if not executable and binary in ("ffmpeg", "ffprobe"):
+            filename = binary + (".exe" if os.name == "nt" else "")
+            executable = next(
+                iter(sorted((self.cache / "tools/ffmpeg").glob("*/bin/" + filename))), None
+            )
         if not executable:
             raise RuntimeError(f"{binary} not installed; on Kali run: sudo apt install ffmpeg")
         self._check_cancelled()
@@ -115,6 +121,7 @@ class MediaLibrary:
             stdin=subprocess.DEVNULL,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )
         deadline = time.monotonic() + timeout
         try:

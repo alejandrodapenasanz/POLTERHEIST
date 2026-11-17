@@ -15,5 +15,6 @@ config/profile.json
 *.log
 .cache/tv_control/
 config/tv_control.json
+config/tv_payload.json
 media/*
 !media/.gitkeep

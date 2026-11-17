@@ -17,6 +17,7 @@ class MediaServer:
         self.ip, self.port, self.roots = ip, port, roots
         self._lock = threading.RLock()
         self._files = {}
+        self._requests = {}
         self._server = None
         self._thread = None
 
@@ -27,22 +28,33 @@ class MediaServer:
 
     def publish(self, media, peer):
         path = confined(media.path, self.roots)
+        profile = getattr(media, "dlna_profile", "")
+        if profile and profile not in ("JPEG_LRG", "JPEG_MED", "JPEG_SM", "JPEG_TN"):
+            raise ValueError("Unknown DLNA image profile")
         with self._lock:
             if self._server is None:
                 self._start()
             route = "/" + secrets.token_urlsafe(24) + path.suffix.lower()
-            self._files[route] = (path, media.mime, peer)
+            self._files[route] = (path, media.mime, peer, profile)
+            self._requests[route] = 0
             return f"http://{self.ip}:{self._server.server_port}{route}"
+
+    def requests(self, url):
+        """Number of authorized GETs; separate from receiver playback/render evidence."""
+        with self._lock:
+            return self._requests.get(urlsplit(url).path, 0)
 
     def release(self, url):
         with self._lock:
             self._files.pop(urlsplit(url).path, None)
+            self._requests.pop(urlsplit(url).path, None)
             if not self._files:
                 self._close()
 
     def close(self):
         with self._lock:
             self._files.clear()
+            self._requests.clear()
             self._close()
 
     def _close(self):
@@ -139,12 +151,22 @@ class MediaServer:
                             self.end_headers()
                             return
                     self.send_response(206 if header else 200)
+                    if not head:
+                        with owner._lock:
+                            if self.path in owner._requests:
+                                owner._requests[self.path] += 1
                     self.send_header("Content-Type", entry[1])
                     self.send_header("Content-Length", str(max(0, end - start + 1)))
                     self.send_header("Accept-Ranges", "bytes")
                     self.send_header("Access-Control-Allow-Origin", "*")
                     self.send_header("X-Content-Type-Options", "nosniff")
                     self.send_header("Cache-Control", "private, no-store")
+                    if entry[3]:
+                        self.send_header(
+                            "contentFeatures.dlna.org",
+                            f"DLNA.ORG_PN={entry[3]};DLNA.ORG_OP=01;DLNA.ORG_CI=0",
+                        )
+                        self.send_header("transferMode.dlna.org", "Interactive")
                     if header:
                         self.send_header("Content-Range", f"bytes {start}-{end}/{size}")
                     self.end_headers()

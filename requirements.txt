@@ -9,3 +9,7 @@ ifaddr==0.2.0
 bleak==3.1.0
 # Animated main menu with coordinated keyboard input on Linux and Windows.
 prompt_toolkit==3.0.53
+# TV Payload validates images for offline HTML and native TV viewers.
+Pillow==13.0.0
+# Previously paired Samsung/webOS TV browser transports.
+websocket-client==1.9.2

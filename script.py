@@ -3861,11 +3861,20 @@ def tv_diagnostics():
     return run(BASE)
 
 
+def tv_payload():
+    from tv_control.payload import run
+
+    return run(BASE, wait=True)
+
+
 def shutdown_tv_control():
     # Do not import TV dependencies unless the feature has been opened.
     module = sys.modules.get("tv_control.cli")
     if module:
         module.shutdown()
+    payload_module = sys.modules.get("tv_control.payload_runtime")
+    if payload_module:
+        payload_module.shutdown()
 
 
 def main(argv=None):
@@ -3918,6 +3927,11 @@ def run_main(argv=None):
         help="Open IoT scanning, connection options and media control (--tv-control is an alias)",
     )
     parser.add_argument(
+        "--tv-payload",
+        action="store_true",
+        help="Automatically detect the TV, upload an offline image/video viewer and disconnect",
+    )
+    parser.add_argument(
         "--tv-diagnostics",
         action="store_true",
         help="Read-only Kali TV hardware diagnostics; no network required",
@@ -3928,6 +3942,30 @@ def run_main(argv=None):
         help="Preview the portal on localhost without changing the network",
     )
     options = parser.parse_args(argv)
+    if options.tv_payload:
+        if any(
+            (
+                options.tv_control,
+                options.tv_diagnostics,
+                options.setup,
+                options.check,
+                options.portal_check,
+                options.portal,
+                options.portal_preview,
+                options.portal_choice,
+                options.wireless,
+                options.ssid,
+                options.bssid,
+            )
+        ):
+            parser.error("Run --tv-payload separately from other workflows.")
+        try:
+            return tv_payload() or 0
+        except (KeyboardInterrupt, EOFError):
+            return 130
+        except (OSError, ValueError, RuntimeError) as error:
+            print("  [!] " + safe_text(error))
+            return 1
     if options.tv_diagnostics:
         if any(
             (

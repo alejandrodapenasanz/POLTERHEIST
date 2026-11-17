@@ -90,6 +90,19 @@ The **Media control submenu** preserves **8 — Wi-Fi Direct discovery**, **9 �
 
 See the **[ordered roadmap](ROADMAP.md)** for Kali validation and subsequent development, and the [TV Control guide](docs/TV_CONTROL.md) for usage and physical test procedures. AirPlay/RAOP/DIAL remain discovery only. Automated tests use labeled fixtures and loopback simulators; physical Kali/TV compatibility remains unverified.
 
+### TV Payload: detect, send and execute
+
+**IoT Scanning → TV Payload (12)** and the TV media submenus first identify the selected
+TV's protocols, then prepare, upload and execute an offline image/video viewer without
+a confirmation prompt. Routes include self-contained HTML through Cast/Samsung/webOS and
+native Android/webOS/Tizen/Roku packages. The PC server closes after the TV confirms loading;
+streaming routes are excluded. Configure `default_target` and `default_media` in
+`config/tv_payload.json` for one-click operation. Availability depends on the receiver and
+existing authorization; unsupported models are reported. The Xiaomi at `192.168.1.159` was
+tested with `media/image.jpg`, including user confirmation after host disconnection.
+Use `POLTERHEIST.py --tv-payload` or see the
+[platform matrix, setup and commands](docs/TV_PAYLOAD.md).
+
 ## Wi-Fi and WPS on Windows
 
 From PowerShell with Python 3.11 or newer:

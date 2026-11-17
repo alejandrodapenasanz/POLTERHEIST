@@ -1,5 +1,10 @@
 # TV Control
 
+For automatic TV detection followed by a compatible viewer payload, use **TV Payload**
+in the TV/IoT menus, or `POLTERHEIST.py --tv-payload`. The [TV Payload guide](TV_PAYLOAD.md)
+describes offline HTML/native payloads, the platform matrix and existing authorization
+requirements. The existing Cast/DLNA media workflow below is also available independently.
+
 Main menu option **4** is now **IoT Scanning** and starts LAN/P2P/BLE discovery automatically. Choose **5 — Media control** inside it for the TV functionality documented here. Existing main options 0–3 and both entry points remain available. `--iot-scan` and legacy `--tv-control` open the same IoT menu. See the [IoT guide](IOT_CONTROL.md). The CLI uses English, matching POLTERHEIST. Use only receivers that you own or have authorization to control.
 
 The H1/H2/H3 extension adds read-only hardware diagnostics and multiprotocol discovery. H4 adds explicit Wi-Fi Direct discovery and WFD classification through Linux D-Bus APIs. See the [ordered roadmap](../ROADMAP.md) for Kali validation and subsequent development. Miracast activation/receiver playback remain preparation only. No dependencies are installed or system configuration changed automatically.

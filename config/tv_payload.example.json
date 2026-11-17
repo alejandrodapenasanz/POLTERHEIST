@@ -1,0 +1,11 @@
+{
+  "default_target": "",
+  "default_media": "media/image.jpg",
+  "devices": {
+    "192.0.2.10": {"samsung_token": ""},
+    "192.0.2.11": {"webos_client_key": "", "webos_device": ""},
+    "192.0.2.12": {"tizen_certificate": ""},
+    "192.0.2.13": {"roku_password": "", "roku_replace_dev": false},
+    "192.0.2.15": {"adb_port": 5555}
+  }
+}

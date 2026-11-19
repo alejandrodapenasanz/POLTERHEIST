@@ -14,6 +14,8 @@ reports/
 config/profile.json
 *.log
 .cache/tv_control/
+.cache/aircrack-validation/
+.cache/aircrack-ng-1.7-win.zip
 config/tv_control.json
 config/tv_payload.json
 media/*

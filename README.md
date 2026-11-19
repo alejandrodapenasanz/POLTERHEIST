@@ -134,7 +134,9 @@ py -m venv .venv
 .\.venv\Scripts\python.exe script.py --wpscan
 ```
 
-`--wpscan`, `--wireless`, `--fingerprint`, and menu option **2** run the automatic workflow for the connected SSID. `--ssid` specifies another authorized scope; `--bssid` restricts it to one radio. Here, `wpscan` means Wi-Fi WPS, not the WordPress scanner. Native discovery requires no WSL, `iw`, Nmap, or `arp-scan`.
+Menu option **2** opens **Wi-Fi / WPS Audit**: choose **1** for the existing WPS detector or **2** for the [Aircrack-ng password audit](docs/WIFI_PASSWORD_AUDIT.md). `--wpscan`, `--wireless`, and `--fingerprint` still run the automatic WPS workflow for the connected SSID. `--ssid` specifies another authorized scope; `--bssid` restricts it to one radio. Here, `wpscan` means Wi-Fi WPS, not the WordPress scanner. Native discovery requires no WSL, `iw`, Nmap, or `arp-scan`.
+
+`python3 POLTERHEIST.py --aircrack` opens the password-audit wizard directly. It accepts an existing 802.11 capture on Linux/Windows with Aircrack-ng on PATH, or captures on Kali/Linux with a compatible monitor adapter. The wizard checks a supplied dictionary against WPA/WPA2-Personal authentication evidence; WPS support is independent. `setup.sh` installs the Aircrack-ng suite on Linux. See the guide for results, time limits and hardware requirements.
 
 ### Assessments
 

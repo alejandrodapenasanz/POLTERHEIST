@@ -110,7 +110,7 @@ class QuietTest(unittest.TestCase):
 class MenuProfileTests(QuietTest):
     def test_all_menu_routes_and_return(self):
         with (
-            patch("builtins.input", side_effect=["invalid", "0", "1", "2", "q"]),
+            patch("builtins.input", side_effect=["invalid", "0", "1", "2", "1", "q", "q"]),
             patch.object(app, "who_am_i") as profile,
             patch.object(app, "lan_recon") as lan,
             patch.object(app, "wireless_recon") as wifi,
@@ -122,7 +122,7 @@ class MenuProfileTests(QuietTest):
 
     def test_menu_recovers_from_feature_error_and_cancellation(self):
         with (
-            patch("builtins.input", side_effect=["1", "2", "q"]),
+            patch("builtins.input", side_effect=["1", "2", "1", "q"]),
             patch.object(app, "lan_recon", side_effect=RuntimeError("missing tool")),
             patch.object(app, "wireless_recon", side_effect=KeyboardInterrupt),
         ):

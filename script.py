@@ -266,6 +266,7 @@ def setup_environment():
             "iw",
             "iproute2",
             "tcpdump",
+            "aircrack-ng",
             "network-manager",
             "dnsmasq-base",
             "nftables",
@@ -2767,6 +2768,32 @@ def write_wireless_report(folder, report):
     dump_json(folder / "report.json", report)
 
 
+def aircrack_audit(ssid=None, bssid=None, mode="menu"):
+    from wifi_audit import wizard
+
+    return wizard(sys.modules[__name__], ssid, bssid, mode)
+
+
+def wireless_menu():
+    while True:
+        print("\n  WI-FI / WPS AUDIT")
+        print("  [1] WPS fingerprint assessment")
+        label = "  [2] WPA/WPA2 password audit / Aircrack-ng"
+        if not shutil.which("aircrack-ng"):
+            label = tint(label + " [UNAVAILABLE: aircrack-ng is not installed]", "\033[91m")
+        print(label)
+        print("  [q] Back")
+        choice = input("  > ").strip().lower()
+        if choice == "q":
+            return
+        if choice == "1":
+            wireless_recon()
+        elif choice == "2":
+            aircrack_audit()
+        else:
+            print("  Invalid option.")
+
+
 def wireless_recon(ssid=None, bssid=None):
     system = operating_system()
     if system["family"] == "unsupported":
@@ -3940,6 +3967,13 @@ def run_main(argv=None):
     )
     parser.add_argument("--windows-elevated", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument(
+        "--aircrack",
+        nargs="?",
+        const="menu",
+        choices=("menu", "live", "file"),
+        help="WPA/WPA2 password audit: choose live Linux capture or an existing capture",
+    )
+    parser.add_argument(
         "--portal-check",
         action="store_true",
         help="Portal and interface diagnostics without changing the network",
@@ -3974,6 +4008,10 @@ def run_main(argv=None):
         help="Preview the portal on localhost without changing the network",
     )
     options = parser.parse_args(argv)
+    if options.aircrack:
+        if options.wireless or options.setup or options.check or options.portal_check:
+            parser.error("Run --aircrack separately from WPS, setup and diagnostic workflows.")
+        options.wireless = True
     if (
         options.at is not None or options.every is not None or options.show_seconds != 10
     ) and not options.tv_payload:
@@ -4104,6 +4142,14 @@ def run_main(argv=None):
         else:
             for binary in ("nmap", "arp-scan", "ip", "iw", "nmcli", "tcpdump"):
                 print(f"  {binary}: {shutil.which(binary) or 'not found'}")
+        print(
+            "  Aircrack-ng (offline password audit): "
+            + (shutil.which("aircrack-ng") or "not installed")
+        )
+        print(
+            "  Airodump-ng (Linux live capture): "
+            + (shutil.which("airodump-ng") or "not installed")
+        )
         try:
             load_upstream()
             print("  Upstream detector: hash verified, Scapy available")
@@ -4144,6 +4190,8 @@ def run_main(argv=None):
             return 1
     if options.wireless:
         try:
+            if options.aircrack:
+                return aircrack_audit(options.ssid, options.bssid, options.aircrack) or 0
             if options.windows_elevated and not windows_is_admin():
                 raise RuntimeError("The process did not receive administrator privileges.")
             if options.ssid is not None or options.bssid is not None:
@@ -4182,7 +4230,7 @@ def run_main(argv=None):
         action = {
             "0": who_am_i,
             "1": lan_recon,
-            "2": wireless_recon,
+            "2": wireless_menu,
             "3": captive_portal,
             "4": tv_control,
         }.get(choice)

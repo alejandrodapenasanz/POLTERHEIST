@@ -24,7 +24,7 @@ NETWORK = Network("fixture LAN", "192.0.2.10", ipaddress.IPv4Network("192.0.2.0/
 
 class PayloadTests(unittest.TestCase):
     def setUp(self):
-        self.root = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        self.root = Path(self.enterContext(tempfile.TemporaryDirectory())).resolve()
         (self.root / "media").mkdir()
         self.source = self.root / "media/image.jpg"
         Image.new("RGB", (32, 24), "blue").save(self.source)

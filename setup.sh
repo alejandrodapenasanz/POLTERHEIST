@@ -96,7 +96,7 @@ if ((install_system && !run_only)); then
         command -v sudo >/dev/null || { printf 'Install sudo or run setup.sh as root.\n' >&2; exit 1; }
     fi
     packages=(python3 python3-venv python3-pip iw iproute2 tcpdump network-manager
-              wpasupplicant bluez systemd dnsmasq-base nftables nmap arp-scan ffmpeg)
+              wpasupplicant bluez systemd dnsmasq-base nftables nmap arp-scan ffmpeg aircrack-ng)
     printf 'Updating APT package lists before installation...\n'
     if "${root_command[@]}" apt-get update -o APT::Update::Error-Mode=any; then
         :

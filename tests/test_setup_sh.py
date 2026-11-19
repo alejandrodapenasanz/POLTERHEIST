@@ -197,7 +197,12 @@ exit
                 commands = self.commands()
                 self.assertIn("/POLTERHEIST.py", commands)
                 self.assertLess(commands.index("-m pip check"), commands.index("/POLTERHEIST.py"))
-                self.assertNotIn("sudo ", commands)
+                # --skip-system skips APT; an existing root-owned venv may still
+                # need permission repair. Python and the app must run as the user.
+                self.assertNotIn("apt-get", commands)
+                for line in commands.splitlines():
+                    if "-m pip " in line or "/POLTERHEIST.py" in line:
+                        self.assertFalse(line.startswith("sudo "), line)
                 if "--iot-scan" in args:
                     self.assertIn("POLTERHEIST.py --iot-scan", commands)
 
@@ -235,6 +240,7 @@ exit
         self.assertIn("sudo -- apt-get update", commands)
         self.assertIn("sudo -- apt-get install -y python3", commands)
         self.assertIn("bluez", commands)
+        self.assertIn("aircrack-ng", commands)
         self.assertNotIn("sudo pip", commands)
         self.assertNotIn("sudo -- python", commands)
 

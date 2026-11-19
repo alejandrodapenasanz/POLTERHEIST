@@ -11,7 +11,7 @@ LOOP_FRAMES = 72
 MENU_ITEMS = (
     ("0", "WHO AM I?"),
     ("1", "LAN RECON"),
-    ("2", "WIRELESS RECON"),
+    ("2", "WIRELESS RECON / WPS & Aircrack-ng"),
     ("3", "CAPTIVE PORTAL"),
     ("4", "IoT SCANNING - Discovery & Control"),
     ("h", "CHECK HARDWARE AGAIN"),

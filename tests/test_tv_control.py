@@ -106,7 +106,7 @@ class QuietTest(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
-        self.root = Path(self.temp.name)
+        self.root = Path(self.temp.name).resolve()
         self.output = io.StringIO()
         capture = contextlib.redirect_stdout(self.output)
         capture.__enter__()
@@ -916,7 +916,7 @@ class ProtocolTests(QuietTest):
 class MenuTests(QuietTest):
     def test_main_menu_routes_existing_and_new_options_and_cleans_up(self):
         with (
-            patch("builtins.input", side_effect=["0", "1", "2", "3", "4", "q"]),
+            patch("builtins.input", side_effect=["0", "1", "2", "1", "q", "3", "4", "q"]),
             patch.object(app, "who_am_i") as profile,
             patch.object(app, "lan_recon") as lan,
             patch.object(app, "wireless_recon") as wifi,

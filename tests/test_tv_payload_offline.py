@@ -13,7 +13,7 @@ from pathlib import Path
 
 from PIL import Image
 
-from tv_control import payload_assets, payload_build
+from tv_control import payload_assets, payload_build, payload_schedule
 from tv_control.http_server import MediaServer
 from tv_control.media import Media, MediaLibrary
 from tv_control.models import Config
@@ -195,6 +195,78 @@ class OfflineViewerTests(unittest.TestCase):
         with zipfile.ZipFile(apk) as package:
             self.assertEqual(package.read("assets/video.mp4"), source.read_bytes())
             self.assertEqual(json.loads(package.read("assets/content.json"))["kind"], "video")
+            self.assertTrue(package.read("classes.dex").startswith(b"dex\n"))
+
+    def check_scheduled_playback(self, video):
+        source = self.video() if video else self.source_dir / "fixture.jpg"
+        if not video:
+            Image.new("RGB", (160, 90), "blue").save(source)
+        schedule = payload_schedule.create(every=1, show_seconds=1)
+        folder = payload_assets.prepare(ROOT, source, schedule=schedule)
+        server = MediaServer("127.0.0.1", 0, (folder,))
+        self.addCleanup(server.close)
+        receipt_file = folder / "receipt.txt"
+        receipt_file.write_text("ready")
+        receipt = server.publish(Media(receipt_file, "text/plain", False), "127.0.0.1")
+        url = server.publish(
+            Media(payload_assets.write_html(folder, receipt), "text/html", False), "127.0.0.1"
+        )
+        call = self.browser()
+        call("Page.navigate", url=url)
+        deadline = time.monotonic() + 15
+        while not server.requests(receipt) and time.monotonic() < deadline:
+            time.sleep(0.1)
+        self.assertGreater(
+            server.requests(receipt), 0, "Future playback must not delay transfer receipt"
+        )
+        server.close()
+        call("Network.enable")
+        call(
+            "Network.emulateNetworkConditions",
+            offline=True,
+            latency=0,
+            downloadThroughput=0,
+            uploadThroughput=0,
+        )
+
+        def evaluate(expression):
+            result = call("Runtime.evaluate", expression=expression, returnByValue=True)
+            self.assertNotIn("exceptionDetails", result)
+            return result["result"].get("value")
+
+        visible = "document.getElementById('picture').style.visibility"
+        self.assertEqual(evaluate(visible), "hidden")
+        if video:
+            self.assertTrue(evaluate("document.getElementById('picture').paused"))
+        for cycle in (0, 1):
+            now = schedule["start_at"] + cycle * schedule["every_ms"] + 100
+            evaluate("Date.now=function(){return " + str(now) + ";}")
+            time.sleep(0.6)
+            self.assertEqual(evaluate(visible), "visible")
+            if video:
+                self.assertFalse(evaluate("document.getElementById('picture').paused"))
+                time.sleep(3.5)
+            else:
+                evaluate("Date.now=function(){return " + str(now + 1100) + ";}")
+                time.sleep(0.6)
+            self.assertEqual(evaluate(visible), "hidden")
+        evaluate("window.cancelPayloadSchedule()")
+        evaluate("Date.now=function(){return " + str(schedule["start_at"] + 10000000) + ";}")
+        time.sleep(0.6)
+        self.assertEqual(evaluate(visible), "hidden")
+
+    def test_scheduled_image_repeats_and_cancels_with_pc_offline(self):
+        self.check_scheduled_playback(False)
+
+    def test_scheduled_video_repeats_and_cancels_with_pc_offline(self):
+        self.check_scheduled_playback(True)
+
+    def test_scheduled_android_package_is_compiled_signed_and_embeds_timing(self):
+        source = self.source_dir / "scheduled.jpg"
+        Image.new("RGB", (160, 90), "blue").save(source)
+        schedule = payload_schedule.create(every=2)
+        with zipfile.ZipFile(payload_build.build_apk(ROOT, source, schedule=schedule)) as package:
+            self.assertEqual(json.loads(package.read("assets/schedule.json")), schedule)
             self.assertTrue(package.read("classes.dex").startswith(b"dex\n"))
 
 

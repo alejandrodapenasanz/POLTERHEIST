@@ -12,6 +12,7 @@ import http.server
 import importlib.util
 import ipaddress
 import json
+import logging
 import os
 import platform
 import re
@@ -28,7 +29,9 @@ from contextlib import contextmanager
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
-from terminal_ui import AnimatedMenu, animation_available
+import startup_check
+from app_logging import configure_logging
+from terminal_ui import MENU_ITEMS, AnimatedMenu, animation_available
 
 VERSION = "2.6.0"
 BASE = Path(__file__).resolve().parent
@@ -146,6 +149,9 @@ def stop_process(proc):
 
 def run_progress(cmd, label, logfile, timeout=None, stop_after_timeout=False):
     """Stream original output to disk; show only real per-phase Nmap progress."""
+    logging.getLogger("polterheist.process").info(
+        "Starting %s; output=%s", Path(cmd[0]).name, logfile
+    )
     env = dict(os.environ, LC_ALL="C", LANG="C")
     with Path(logfile).open("w", encoding="utf-8") as log, Spinner(label) as activity:
         proc = subprocess.Popen(
@@ -192,6 +198,7 @@ def run_progress(cmd, label, logfile, timeout=None, stop_after_timeout=False):
             reader.join(timeout=5)
             proc.stdout.close()
     output = Path(logfile).read_text(encoding="utf-8")
+    logging.getLogger("polterheist.process").info("Finished %s; exit=%s", Path(cmd[0]).name, status)
     return subprocess.CompletedProcess(cmd, status, output, "")
 
 
@@ -3717,8 +3724,16 @@ def portal_run(config):
 
 def captive_portal(choice=None):
     print(tint("\nPOLTERHEIST :: CAPTIVE PORTAL"))
-    print("  [1] Create Wi-Fi (choose a name and password) — Kali/Linux")
-    print("  [2] Use a router as an access point — Kali/Linux")
+    print(
+        startup_check.annotate(
+            "ap", "  [1] Create Wi-Fi (choose a name and password) — Kali/Linux", color=COLOR
+        )
+    )
+    print(
+        startup_check.annotate(
+            "3", "  [2] Use a router as an access point — Kali/Linux", color=COLOR
+        )
+    )
     print("  [v] Local preview — Windows/Linux\n  [q] Back")
     if choice is None:
         choice = input("  > ").strip().lower()
@@ -3861,10 +3876,10 @@ def tv_diagnostics():
     return run(BASE)
 
 
-def tv_payload():
+def tv_payload(schedule=None, interactive=True):
     from tv_control.payload import run
 
-    return run(BASE, wait=True)
+    return run(BASE, wait=True, schedule=schedule, interactive=interactive)
 
 
 def shutdown_tv_control():
@@ -3878,10 +3893,22 @@ def shutdown_tv_control():
 
 
 def main(argv=None):
+    configure_logging(BASE)
+    logger = logging.getLogger("polterheist")
+    logger.info("Application started")
     try:
-        return run_main(argv)
+        result = run_main(argv)
+        logger.info("Application finished: %s", result)
+        return result
+    except Exception:
+        logger.exception("Unhandled application error")
+        raise
     finally:
-        shutdown_tv_control()
+        try:
+            shutdown_tv_control()
+        except Exception:
+            logger.exception("Shutdown failed")
+            raise
 
 
 def run_main(argv=None):
@@ -3936,12 +3963,25 @@ def run_main(argv=None):
         action="store_true",
         help="Read-only Kali TV hardware diagnostics; no network required",
     )
+    parser.add_argument("--at", help="With --tv-payload: start at HH:MM or ISO date/time")
+    parser.add_argument("--every", type=float, help="With --tv-payload: repeat every X minutes")
+    parser.add_argument(
+        "--show-seconds", type=float, default=10, help="Seconds per repeated PayloadTV image"
+    )
     parser.add_argument(
         "--portal-preview",
         action="store_true",
         help="Preview the portal on localhost without changing the network",
     )
     options = parser.parse_args(argv)
+    if (
+        options.at is not None or options.every is not None or options.show_seconds != 10
+    ) and not options.tv_payload:
+        parser.error("--at, --every and --show-seconds require --tv-payload")
+    if not options.setup:
+        print("  Checking local hardware...")
+        startup_check.refresh(windows_interfaces=detect_windows_interfaces)
+        startup_check.display()
     if options.tv_payload:
         if any(
             (
@@ -3960,10 +4000,20 @@ def run_main(argv=None):
         ):
             parser.error("Run --tv-payload separately from other workflows.")
         try:
+            if options.at is not None or options.every is not None:
+                from tv_control.payload_schedule import create
+
+                return (
+                    tv_payload(
+                        create(options.at, options.every, options.show_seconds), interactive=False
+                    )
+                    or 0
+                )
             return tv_payload() or 0
         except (KeyboardInterrupt, EOFError):
             return 130
         except (OSError, ValueError, RuntimeError) as error:
+            logging.getLogger("polterheist").exception("Workflow failed")
             print("  [!] " + safe_text(error))
             return 1
     if options.tv_diagnostics:
@@ -3989,6 +4039,7 @@ def run_main(argv=None):
         except (KeyboardInterrupt, EOFError):
             return 130
         except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as error:
+            logging.getLogger("polterheist").exception("Workflow failed")
             print("  [!] " + safe_text(error))
             return 1
     if options.tv_control and (
@@ -4010,12 +4061,14 @@ def run_main(argv=None):
         try:
             return setup_environment()
         except (OSError, RuntimeError, subprocess.SubprocessError) as error:
+            logging.getLogger("polterheist").exception("Workflow failed")
             print("  [!] " + safe_text(error))
             return 1
     if options.portal_check:
         try:
             return portal_check()
         except (OSError, ValueError, RuntimeError) as error:
+            logging.getLogger("polterheist").exception("Workflow failed")
             print("  [!] " + safe_text(error))
             return 1
     if options.ssid is not None or options.bssid is not None:
@@ -4061,7 +4114,7 @@ def run_main(argv=None):
     if not any((options.tv_control, options.portal, options.portal_preview, options.wireless)):
         if animation_available(options.no_animation):
             try:
-                menu = AnimatedMenu(BANNER, VERSION)
+                menu = AnimatedMenu(BANNER, VERSION, capabilities=startup_check.CURRENT)
             except ImportError:
                 pass  # Static menu remains usable before requirements are updated.
     if menu is None:
@@ -4073,6 +4126,7 @@ def run_main(argv=None):
         except (KeyboardInterrupt, EOFError):
             return 130
         except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as error:
+            logging.getLogger("polterheist").exception("Workflow failed")
             print(tint("  [!] " + safe_text(error), AMBER))
             return 1
     if options.portal or options.portal_preview:
@@ -4085,6 +4139,7 @@ def run_main(argv=None):
         except (KeyboardInterrupt, EOFError):
             return 130
         except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as error:
+            logging.getLogger("polterheist").exception("Workflow failed")
             print(tint("  [!] " + safe_text(error), AMBER))
             return 1
     if options.wireless:
@@ -4097,6 +4152,7 @@ def run_main(argv=None):
         except (KeyboardInterrupt, EOFError):
             return 130
         except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as error:
+            logging.getLogger("polterheist").exception("Workflow failed")
             print(tint("  [!] " + safe_text(error), AMBER))
             return 1
         finally:
@@ -4107,11 +4163,9 @@ def run_main(argv=None):
                     pass
     while True:
         if menu is None:
-            print(
-                tint(
-                    "\n[0] WHO AM I?\n[1] LAN RECON\n[2] WIRELESS RECON\n[3] CAPTIVE PORTAL\n[4] IoT SCANNING — Discovery & Control\n\n[q] EXIT"
-                )
-            )
+            print()
+            for key, label in MENU_ITEMS:
+                print(startup_check.annotate(key, f"[{key}] {label}", color=COLOR))
         try:
             choice = menu.read_choice() if menu is not None else input("  > ").strip().lower()
         except (KeyboardInterrupt, EOFError):
@@ -4119,6 +4173,12 @@ def run_main(argv=None):
             return 0
         if choice == "q":
             return 0
+        if choice == "h":
+            startup_check.refresh(windows_interfaces=detect_windows_interfaces)
+            startup_check.display()
+            if menu is not None:
+                menu.capabilities = startup_check.CURRENT
+            continue
         action = {
             "0": who_am_i,
             "1": lan_recon,
@@ -4130,10 +4190,22 @@ def run_main(argv=None):
             print("  Invalid option.")
             continue
         try:
+            logging.getLogger("polterheist").info(
+                "Action started: %s", dict(MENU_ITEMS).get(choice, choice)
+            )
             action()
+            logging.getLogger("polterheist").info(
+                "Action finished: %s", dict(MENU_ITEMS).get(choice, choice)
+            )
         except (KeyboardInterrupt, EOFError):
+            logging.getLogger("polterheist").info(
+                "Action cancelled: %s", dict(MENU_ITEMS).get(choice, choice)
+            )
             print("\n  Returning to the menu.")
         except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as error:
+            logging.getLogger("polterheist").exception(
+                "Action failed: %s", dict(MENU_ITEMS).get(choice, choice)
+            )
             print(tint("  [!] " + safe_text(error), AMBER))
 
 

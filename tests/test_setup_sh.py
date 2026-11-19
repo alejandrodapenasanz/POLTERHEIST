@@ -238,6 +238,23 @@ exit
         self.assertNotIn("sudo pip", commands)
         self.assertNotIn("sudo -- python", commands)
 
+    def test_root_owned_environment_repairs_only_managed_paths_before_pip(self):
+        self.seed_environment()
+        self.write(
+            self.bin / "find",
+            """#!/usr/bin/env bash
+printf 'find %s\\n' "$*" >> "$SETUP_LOG"
+if [[ "$*" != *-exec* ]]; then printf '%s/root-owned-file\\n' "$2"; fi
+""",
+        )
+        result = self.run_setup("--skip-system", "--no-shell")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        commands = self.commands()
+        repair = next(line for line in commands.splitlines() if line.startswith("sudo -- find"))
+        self.assertIn("/venv -xdev -uid 0 -exec chown -h 1000:1000", repair)
+        self.assertLess(commands.index(repair), commands.index("-m pip install"))
+        self.assertNotIn("chown -R", commands)
+
     def test_pip_failure_does_not_start_application(self):
         self.env["SIMULATED_PIP_FAIL"] = "1"
         result = self.run_setup("--run")

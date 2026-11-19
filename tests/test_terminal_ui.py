@@ -149,7 +149,8 @@ class MainMenuIntegrationTests(unittest.TestCase):
             self.assertEqual(script.main([]), 0)
             profile.assert_called_once_with()
             self.assertEqual(menu.read_choice.call_count, 2)
-            self.assertEqual(output.getvalue(), "")
+            self.assertIn("LOCAL HARDWARE CHECK", output.getvalue())
+            self.assertNotIn("[0] WHO AM I?", output.getvalue())
 
     def test_explicit_static_option_and_missing_dependency_keep_existing_menu(self):
         for missing in (True, False):

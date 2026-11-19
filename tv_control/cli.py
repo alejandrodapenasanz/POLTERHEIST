@@ -4,8 +4,9 @@ import atexit
 import json
 import logging
 from dataclasses import asdict, replace
-from logging.handlers import RotatingFileHandler
 from pathlib import Path
+
+import startup_check
 
 from .bluetooth import Bluetooth
 from .connections import Connections, select_iot_devices
@@ -19,18 +20,9 @@ _application = None
 
 
 def configure_logging(root):
-    folder = Path(root) / "reports" / "tv_control"
-    folder.mkdir(parents=True, exist_ok=True)
-    handler = RotatingFileHandler(
-        folder / "tv_control.log", maxBytes=2_000_000, backupCount=2, encoding="utf-8"
-    )
-    handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s %(message)s"))
-    for name in ("tv_control", "pychromecast", "zeroconf"):
-        logger = logging.getLogger(name)
-        logger.addHandler(handler)
-        logger.setLevel(logging.DEBUG if name == "tv_control" else logging.WARNING)
-        logger.propagate = False
-    return handler
+    from app_logging import configure_logging as configure
+
+    return configure(root)
 
 
 def confirm_playback(devices):
@@ -54,7 +46,7 @@ class Application:
         self.manager = Manager(root, self.network, self.config)
         self.bluetooth = Bluetooth(self.config)
         self.connections = Connections(self.network, self.config, self.bluetooth)
-        self.handler = configure_logging(root)
+        self.log_path = configure_logging(root)
         self.selected = []
         self.source = None
 
@@ -269,7 +261,7 @@ class Application:
     def targets(self):
         while True:
             self.show_devices()
-            print(
+            text = (
                 "\nSELECT TARGET DEVICES\n  [1] Connect to all detected media receivers\n"
                 "  [2] Connect to specific receivers\n  [3] Refresh discovery\n"
                 "  [4] Directed discovery by IP / hostname / CIDR\n"
@@ -279,6 +271,7 @@ class Application:
                 "  [10] Prepare Miracast / local presentation\n"
                 "  [11] TV Payload (detect / send / execute)\n  [0] Back"
             )
+            print(startup_check.annotate_menu(text, {"8": "p2p", "9": "p2p", "10": "p2p"}))
             choice = input("  > ").strip()
             try:
                 if choice == "0":
@@ -329,7 +322,11 @@ class Application:
 
     def media(self):
         while True:
-            print("\nMEDIA SELECTION\n  [1] Image\n  [2] Video\n  [0] Back")
+            print(
+                startup_check.annotate_menu(
+                    "\nMEDIA SELECTION\n  [1] Image\n  [2] Video\n  [0] Back", {"2": "video"}
+                )
+            )
             choice = input("  > ").strip()
             if choice == "0":
                 return None
@@ -516,7 +513,7 @@ class Application:
                     else:
                         print("  Invalid option.")
                 except (ValueError, RuntimeError, OSError) as error:
-                    logging.getLogger(__name__).warning("IoT action %s failed: %s", choice, error)
+                    logging.getLogger(__name__).exception("IoT action %s failed: %s", choice, error)
                     print("  [!] " + safe_text(error))
         except (KeyboardInterrupt, EOFError):
             print("\n  Cancelling IoT/media operations and releasing resources.")
@@ -532,9 +529,7 @@ class Application:
                 except Exception as error:
                     failures.append(str(error))
         finally:
-            for name in ("tv_control", "pychromecast", "zeroconf"):
-                logging.getLogger(name).removeHandler(self.handler)
-            self.handler.close()
+            logging.getLogger(__name__).info("IoT application closed")
         if failures:
             raise RuntimeError("Resource cleanup unconfirmed: " + "; ".join(failures))
 

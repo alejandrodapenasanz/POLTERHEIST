@@ -5,6 +5,7 @@ import atexit
 import datetime
 import errno
 import json
+import logging
 import shutil
 import socket
 import time
@@ -12,7 +13,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from . import payload_adapters as adapters
-from . import payload_assets, payload_detection, payload_native
+from . import payload_assets, payload_detection, payload_native, payload_schedule
 from .http_server import MediaServer
 from .media import Media
 from .models import Config, safe_text
@@ -79,6 +80,9 @@ def settings_for(root, target):
             valid = isinstance(value, str) and len(value) <= 8192
         if not valid:
             raise ValueError("Invalid TV Payload setting: " + key)
+    from app_logging import register_secrets
+
+    register_secrets(settings.values())
     return settings
 
 
@@ -308,12 +312,20 @@ class PayloadJob:
                 encoding="utf-8",
             )
 
-    def start(self, source, strategy="auto", confirmed=False):
+    def start(self, source, strategy="auto", confirmed=False, schedule=None):
         if not confirmed:
             raise ValueError("Confirm sending and executing the TV Payload")
         if strategy not in STRATEGIES:
             raise ValueError("Unknown payload strategy")
-        self.folder = payload_assets.prepare(self.root, source)
+        self.schedule = schedule
+        self.folder = payload_assets.prepare(self.root, source, schedule=schedule)
+        self.report["schedule"] = schedule
+        logging.getLogger(__name__).info(
+            "Payload start: target=%s strategy=%s schedule=%s",
+            self.profile.target,
+            strategy,
+            schedule,
+        )
         self.report["artifact_directory"] = str(self.folder)
         self.report["source"] = str(source)
         candidates = [
@@ -350,8 +362,14 @@ class PayloadJob:
                 self.cleanup()
                 self.report["host_session"] = "CLOSED_AFTER_TRANSFER"
                 self.save()
+                logging.getLogger(__name__).info(
+                    "Payload transferred: %s; %s",
+                    result["state"],
+                    payload_schedule.describe(schedule),
+                )
                 return self.report
             except Exception as error:
+                logging.getLogger(__name__).exception("Payload route failed: %s", plan.strategy)
                 # Authentication values and URLs are not included in reports.
                 detail = str(error)
                 for secret in self.settings.values():
@@ -376,6 +394,7 @@ class PayloadJob:
                 source,
                 self.settings.get("adb_port", 5555),
                 confirmed=True,
+                schedule=getattr(self, "schedule", None),
             )
             return {
                 "state": result["status"],
@@ -478,15 +497,20 @@ def inspect(root, target, port=5555):
     return profile, plans, settings
 
 
-def run(root, wait=False):
+def run(root, wait=False, schedule=None, interactive=True):
     print("\nTV Payload — Automatic detection and offline image/video deployment")
+    if interactive:
+        schedule = payload_schedule.prompt()
+    print("  " + payload_schedule.describe(schedule))
+    if schedule:
+        print("  Keep the TV viewer open. Back/Escape on the TV cancels the schedule.")
     target = automatic_target(root)
     source = automatic_source(root)
     profile, plans, settings = inspect(root, target)
     print("  Content: " + safe_text(source.name))
     job = PayloadJob(root, profile, plans, settings)
     try:
-        job.start(source, confirmed=True)
+        job.start(source, confirmed=True, schedule=schedule)
         print("  " + job.report["state"] + " | " + str(job.report_path))
         print(
             "  Transfer complete. The TV has the content; the PC server and connection are closed."
@@ -576,6 +600,16 @@ def main(argv=None):
     parser.add_argument("--port", type=int, default=5555, help="Optional preauthorized ADB port")
     parser.add_argument("--strategy", choices=STRATEGIES, default="auto")
     parser.add_argument("--detect-only", action="store_true")
+    parser.add_argument("--at", help="Start at HH:MM local time or ISO date/time")
+    parser.add_argument(
+        "--every", type=float, help="Repeat every X minutes, first run after X minutes"
+    )
+    parser.add_argument(
+        "--show-seconds",
+        type=float,
+        default=10,
+        help="Image display seconds per repeat (default 10)",
+    )
     parser.add_argument(
         "--prepare-only",
         action="store_true",
@@ -597,10 +631,15 @@ def main(argv=None):
     )
     args = parser.parse_args(argv)
     root = Path(__file__).resolve().parent.parent
+    from app_logging import configure_logging
+
+    configure_logging(root)
     if not 0 <= args.duration <= 86400:
         parser.error("--duration must be between 0 and 86400")
     job = None
     try:
+        schedule = payload_schedule.create(args.at, args.every, args.show_seconds)
+        print(payload_schedule.describe(schedule))
         if args.detect_only:
             target = automatic_target(root, args.target)
             profile, _, _ = inspect(root, target, args.port)
@@ -609,10 +648,10 @@ def main(argv=None):
         if args.build_only:
             from .payload_build import build_apk
 
-            print("APK ready: " + str(build_apk(root, source)))
+            print("APK ready: " + str(build_apk(root, source, schedule=schedule)))
             return 0
         if args.prepare_only:
-            folder = payload_assets.prepare(root, source)
+            folder = payload_assets.prepare(root, source, schedule=schedule)
             for platform in ("webos", "tizen", "roku"):
                 payload_assets.native_sources(folder, platform)
             print("HTML and native source packages ready: " + str(folder))
@@ -620,11 +659,12 @@ def main(argv=None):
         target = automatic_target(root, args.target)
         profile, plans, settings = inspect(root, target, args.port)
         job = PayloadJob(root, profile, plans, settings)
-        report = job.start(source, args.strategy, confirmed=True)
+        report = job.start(source, args.strategy, confirmed=True, schedule=schedule)
         print(report["state"] + " | " + str(job.report_path))
         print("PC disconnected from the payload. The complete content is on the TV.")
         return 0
     except (OSError, ValueError, RuntimeError, ImportError) as error:
+        logging.getLogger(__name__).exception("Payload failed")
         print("[!] " + safe_text(error))
         return 1
     except (KeyboardInterrupt, EOFError):

@@ -97,8 +97,15 @@ if ((install_system && !run_only)); then
     fi
     packages=(python3 python3-venv python3-pip iw iproute2 tcpdump network-manager
               wpasupplicant bluez systemd dnsmasq-base nftables nmap arp-scan ffmpeg)
+    printf 'Updating APT package lists before installation...\n'
+    if "${root_command[@]}" apt-get update -o APT::Update::Error-Mode=any; then
+        :
+    else
+        apt_status=$?
+        printf 'APT update failed. Check sudo permissions, repository configuration and Internet access; no dependencies were installed.\n' >&2
+        exit "$apt_status"
+    fi
     printf 'Installing system packages via APT: %s\n' "${packages[*]}"
-    "${root_command[@]}" apt-get update
     "${root_command[@]}" apt-get install -y "${packages[@]}"
 fi
 
@@ -114,6 +121,38 @@ if [[ -d "$env_dir/Scripts" && ! -x "$env_dir/bin/python" ]]; then
     env_dir="$project_dir/venv-linux"
 fi
 env_python="$env_dir/bin/python"
+if ((!run_only)); then
+    # Repair leftovers from previous root installations, without changing source
+    # files, other users' ownership, Windows venvs, or symlink targets.
+    owner_uid="$(id -u)"
+    owner_gid="$(id -g)"
+    if ((${#user_command[@]})); then
+        owner_uid="$(id -u "$SUDO_USER")"
+        owner_gid="$(id -g "$SUDO_USER")"
+    fi
+    if [[ "$owner_uid" != 0 ]]; then
+        if ! "${user_command[@]}" test -w "$project_dir" && [[ "$(stat -c %u -- "$project_dir")" == 0 ]]; then
+            "${root_command[@]}" chown --from=0 "$owner_uid:$owner_gid" -- "$project_dir"
+            "${root_command[@]}" chmod u+rwx -- "$project_dir"
+        fi
+        for managed in "$env_dir" "$project_dir/reports" "$project_dir/.cache" "$project_dir/config"; do
+            [[ -e "$managed" ]] || continue
+            if [[ -L "$managed" || "$managed" != "$project_dir/"* ]]; then
+                printf 'Refusing permission repair outside the project or through a symlink: %s\n' "$managed" >&2
+                exit 1
+            fi
+            # Inspect as the caller. An unreadable directory also needs repair.
+            if ! owned_by_root="$("${user_command[@]}" find -P "$managed" -xdev -uid 0 -print -quit 2>/dev/null)" || [[ -n "$owned_by_root" ]]; then
+                printf 'Repairing root-owned setup files in %s\n' "$managed"
+                "${root_command[@]}" find -P "$managed" -xdev -uid 0 -exec chown -h "$owner_uid:$owner_gid" -- '{}' +
+            fi
+        done
+    fi
+    if ! "${user_command[@]}" test -w "$project_dir"; then
+        printf 'Project directory is not writable by the installing user: %s\n' "$project_dir" >&2
+        exit 1
+    fi
+fi
 if [[ ! -x "$env_python" || ! -f "$env_dir/pyvenv.cfg" ]]; then
     if ((run_only)); then
         printf 'No Linux venv found. Run bash setup.sh first.\n' >&2

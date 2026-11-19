@@ -93,12 +93,15 @@ class TVPayload:
         }
 
 
-def deploy(root, target, source, port=5555, *, confirmed=False, apk=None):
+def deploy(root, target, source, port=5555, *, confirmed=False, apk=None, schedule=None):
     if not confirmed:
         raise ValueError("Confirm installation before deploying TV Payload")
     root = Path(root).resolve()
     source = validate_source(root, source)
-    apk = build_apk(root, source) if apk is None else Path(apk).resolve(strict=True)
+    if apk is None:
+        apk = build_apk(root, source, schedule=schedule) if schedule else build_apk(root, source)
+    else:
+        apk = Path(apk).resolve(strict=True)
     report = {
         "recorded_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
         "target": target,
@@ -112,6 +115,7 @@ def deploy(root, target, source, port=5555, *, confirmed=False, apk=None):
         "installed": False,
         "launch_acknowledged": False,
         "visual_confirmation": False,
+        "schedule": schedule,
     }
     folder = root / "reports/tv_payload"
     folder.mkdir(parents=True, exist_ok=True)
@@ -134,10 +138,10 @@ def deploy(root, target, source, port=5555, *, confirmed=False, apk=None):
         print("  Deployment report: " + str(report_path))
 
 
-def run(root, wait=False):
+def run(root, wait=False, **kwargs):
     from .payload_runtime import run as adaptive_run
 
-    return adaptive_run(root, wait=wait)
+    return adaptive_run(root, wait=wait, **kwargs)
 
 
 def main(argv=None):

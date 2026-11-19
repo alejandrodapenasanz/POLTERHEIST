@@ -74,6 +74,7 @@ cp config/tv_control.example.json config/tv_control.json
 | `discovery_timeout` | `5` | Seconds collecting mDNS/SSDP responses. |
 | `request_timeout` | `5` | Per receiver request timeout; UPnP description resolution has a shared budget of four times this value after SSDP collection. |
 | `connect_timeout` | `10` | Cast connection and playback acknowledgment timeout. |
+| `launch_timeout` | `30` | Startup budget for the Cast media receiver, before sending playback commands. Cold TV app launches can exceed the ordinary request timeout. |
 | `poll_interval` | `2` | Seconds between per-device playback checks. |
 | `retries` | `2` | Additional connection attempts or consecutive status/loop error attempts, limited to 0–3. |
 | `max_devices` | `32` | Discovery response cap, limited to 1–64 per protocol. |

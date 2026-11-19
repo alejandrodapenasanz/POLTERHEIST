@@ -299,15 +299,18 @@ class ConnectionTests(Base):
         self.assertEqual(app.connections.records[2]["state"], "CONNECTED")
         accepted.play.assert_not_called()
 
-    def test_cleanup_failure_still_closes_other_resources_and_log(self):
+    def test_cleanup_failure_closes_resources_and_keeps_shared_logging_available(self):
         app = cli.Application.__new__(cli.Application)
-        app.manager, app.connections, app.bluetooth, app.handler = (Mock() for _ in range(4))
+        app.manager, app.connections, app.bluetooth = (Mock() for _ in range(3))
         app.manager.close.side_effect = RuntimeError("SIMULATED cleanup failure")
-        with self.assertRaisesRegex(RuntimeError, "cleanup failure"):
+        with (
+            patch("tv_control.cli.logging.getLogger") as logger,
+            self.assertRaisesRegex(RuntimeError, "cleanup failure"),
+        ):
             app.close()
         app.connections.close.assert_called_once()
         app.bluetooth.close.assert_called_once()
-        app.handler.close.assert_called_once()
+        logger.return_value.info.assert_called_once_with("IoT application closed")
 
 
 if __name__ == "__main__":

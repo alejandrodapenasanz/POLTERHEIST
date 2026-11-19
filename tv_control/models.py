@@ -14,6 +14,7 @@ class Config:
     discovery_timeout: float = 5
     request_timeout: float = 5
     connect_timeout: float = 10
+    launch_timeout: float = 30
     poll_interval: float = 2
     retries: int = 2
     max_devices: int = 32
@@ -27,7 +28,13 @@ class Config:
     ble_timeout: float = 8
 
     def __post_init__(self):
-        for name in ("discovery_timeout", "request_timeout", "connect_timeout", "poll_interval"):
+        for name in (
+            "discovery_timeout",
+            "request_timeout",
+            "connect_timeout",
+            "launch_timeout",
+            "poll_interval",
+        ):
             value = getattr(self, name)
             if isinstance(value, bool) or not isinstance(value, (float, int)):
                 raise ValueError(f"{name} must be numeric")

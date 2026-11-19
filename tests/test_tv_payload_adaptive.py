@@ -305,7 +305,7 @@ class AdaptiveTests(unittest.TestCase):
             job.start(self.source, confirmed=True)
         self.assertEqual(job.report["state"], "FAILED")
 
-    def test_configured_one_click_entry_never_prompts(self):
+    def test_configured_entry_offers_schedule_before_sending(self):
         (self.root / "config").mkdir()
         (self.root / "config/tv_payload.json").write_text(
             json.dumps(
@@ -313,7 +313,7 @@ class AdaptiveTests(unittest.TestCase):
             )
         )
         with (
-            patch("builtins.input", side_effect=AssertionError("No prompt expected")),
+            patch("builtins.input", return_value="1") as prompt,
             patch.object(
                 runtime, "inspect", return_value=(self.profile(endpoint()), [], {})
             ) as inspect,
@@ -321,7 +321,10 @@ class AdaptiveTests(unittest.TestCase):
         ):
             runtime.run(self.root)
         inspect.assert_called_once_with(self.root, "192.0.2.20")
-        constructor.return_value.start.assert_called_once_with(self.source, confirmed=True)
+        prompt.assert_called_once()
+        constructor.return_value.start.assert_called_once_with(
+            self.source, confirmed=True, schedule=None
+        )
         constructor.return_value.close.assert_called_once_with()
 
     def test_cli_never_asks_for_confirmation_without_yes_flag(self):
@@ -333,7 +336,9 @@ class AdaptiveTests(unittest.TestCase):
             patch.object(runtime, "PayloadJob") as constructor,
         ):
             self.assertEqual(runtime.main([]), 0)
-        constructor.return_value.start.assert_called_once_with(self.source, "auto", confirmed=True)
+        constructor.return_value.start.assert_called_once_with(
+            self.source, "auto", confirmed=True, schedule=None
+        )
 
     def test_ready_native_package_precedes_browser(self):
         profile = self.profile(endpoint(), endpoint("Android TV Remote"), ports=[5555])
@@ -360,6 +365,23 @@ class AdaptiveTests(unittest.TestCase):
             adapter.launch("http://local/viewer")
         cast.quit_app.assert_called_once_with(timeout=CONFIG.connect_timeout)
         controller.load_url.assert_called_once_with("http://local/viewer", force=True)
+
+    def test_cast_restarts_previous_viewer_even_when_namespace_is_still_advertised(self):
+        cast, controller = Mock(), Mock()
+        controller.supporting_app_id = cast.app_id = "84912283"
+        controller.is_active = True  # Xiaomi retains this after force-navigation.
+
+        def launched(**kwargs):
+            kwargs["callback_function"](True, {})
+
+        controller.launch.side_effect = launched
+        with (
+            patch.object(adapters, "cast_connection", return_value=cast),
+            patch("pychromecast.controllers.dashcast.DashCastController", return_value=controller),
+        ):
+            adapters.CastHTML(endpoint(), CONFIG).launch("http://local/replacement")
+        cast.quit_app.assert_called_once_with(timeout=CONFIG.connect_timeout)
+        controller.load_url.assert_called_once_with("http://local/replacement", force=True)
 
     def test_auto_discovery_uses_unique_tv_and_rejects_ambiguous_targets(self):
         from tv_control.protocols import dlna, google_cast

@@ -194,8 +194,22 @@ class GoogleCast(Backend):
     def play(self, url, media):
         if self.url:
             self.require_owned()
-        self.url = url
         mc = self.cast.media_controller
+        # A cold receiver launch may take much longer than an ordinary media
+        # command. Wait for it separately before starting the request deadline.
+        if self.cast.app_id != MEDIA_APP:
+            from pychromecast.response_handler import WaitResponse
+
+            deadline = time.monotonic() + self.config.launch_timeout
+            response = WaitResponse(self.config.launch_timeout, "Cast media receiver startup")
+            mc.launch(callback_function=response.callback)
+            response.wait_response()
+            while not mc.is_active:
+                if time.monotonic() >= deadline:
+                    raise TimeoutError("Cast media receiver did not expose its media namespace")
+                self.cast.socket_client.receiver_controller.update_status()
+                time.sleep(0.2)
+        self.url = url
         # Public PyChromecast controller API; one-item native Cast repeat queue.
         try:
             self._request(

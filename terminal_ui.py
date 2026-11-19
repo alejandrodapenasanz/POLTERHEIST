@@ -14,6 +14,7 @@ MENU_ITEMS = (
     ("2", "WIRELESS RECON"),
     ("3", "CAPTIVE PORTAL"),
     ("4", "IoT SCANNING - Discovery & Control"),
+    ("h", "CHECK HARDWARE AGAIN"),
     ("q", "EXIT"),
 )
 # Unicode Braille encodes a 2 x 4 dot matrix in each terminal cell.
@@ -85,7 +86,7 @@ class Ghost:
 class AnimatedMenu:
     """One renderer owns both the moving logo and the editable input line."""
 
-    def __init__(self, banner, version, *, input=None, output=None):
+    def __init__(self, banner, version, *, input=None, output=None, capabilities=None):
         # Optional at runtime: old installations can still use the static menu.
         from prompt_toolkit.application import Application
         from prompt_toolkit.filters import Condition
@@ -99,6 +100,7 @@ class AnimatedMenu:
         self.ghost = Ghost(banner)
         self.started = time.monotonic()
         self.notice = ""
+        self.capabilities = capabilities or {}
         try:
             "\u28ff".encode(sys.stdout.encoding or "utf-8")
             self.unicode = True
@@ -113,7 +115,7 @@ class AnimatedMenu:
             if choice in {key for key, _ in MENU_ITEMS}:
                 event.app.exit(result=choice)
             else:
-                self.notice = "  Choose 0-4, or q to exit."
+                self.notice = "  Choose 0-4, h to check hardware, or q to exit."
                 self.field.text = ""
 
         @bindings.add("c-c")
@@ -130,12 +132,6 @@ class AnimatedMenu:
             wrap_lines=False,
             dont_extend_height=True,
         )
-        menu = []
-        for key, label in MENU_ITEMS:
-            if key == "q":
-                menu.append(("", "\n"))
-            menu.extend([("class:key", f"  [{key}] "), ("class:menu", label + "\n")])
-        menu[-1] = (menu[-1][0], menu[-1][1].rstrip("\n"))
         layout = HSplit(
             [
                 ConditionalContainer(art, filter=Condition(lambda: self.art_size()[1] > 0)),
@@ -150,7 +146,7 @@ class AnimatedMenu:
                     wrap_lines=False,
                 ),
                 Window(height=1),
-                Window(FormattedTextControl(menu), height=7, wrap_lines=False),
+                Window(FormattedTextControl(self.menu_fragments), height=8, wrap_lines=False),
                 Window(height=1),
                 self.field,
                 Window(
@@ -177,6 +173,8 @@ class AnimatedMenu:
                     "menu": "#d0e0d8",
                     "muted": "#81968c",
                     "hint": "#81968c",
+                    "unavailable": "#ff5555",
+                    "unknown": "#ffb44b",
                 }
             ),
             color_depth=ColorDepth.DEPTH_1_BIT if no_color else None,
@@ -192,7 +190,7 @@ class AnimatedMenu:
         size = self.application.output.get_size()
         # Leave room for the menu/input and one spare terminal row. Small
         # terminals keep the menu; enlarging them brings the ghost back.
-        height = min(16, max(0, size.rows - 14))
+        height = min(16, max(0, size.rows - 15))
         if size.columns < 32 or height < 6:
             return 0, 0
         return min(38, size.columns - 4), height
@@ -211,3 +209,23 @@ class AnimatedMenu:
         self.field.text = ""
         self.notice = ""
         return self.application.run()
+
+    def menu_fragments(self):
+        fragments = []
+        for key, label in MENU_ITEMS:
+            cap = self.capabilities.get(key)
+            style = "class:menu"
+            if cap and cap.available is not True:
+                style = "class:unavailable" if cap.available is False else "class:unknown"
+                label += (
+                    " ["
+                    + ("UNAVAILABLE" if cap.available is False else "UNKNOWN")
+                    + ": "
+                    + cap.reason
+                    + "]"
+                )
+            if key == "q":
+                fragments.append(("", "\n"))
+            fragments.append((style, f"  [{key}] {label}\n"))
+        fragments[-1] = (fragments[-1][0], fragments[-1][1].rstrip("\n"))
+        return fragments

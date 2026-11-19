@@ -79,9 +79,10 @@ class CastHTML:
         self.cast = cast_connection(self.endpoint, self.config)
         controller = DashCastController()
         self.cast.register_handler(controller)
-        # Force-navigation replaces DashCast's document and its custom namespace.
-        # LAUNCH on that same app can return the old session instead of reloading it.
-        if self.cast.app_id == controller.supporting_app_id and not controller.is_active:
+        # Force-navigation can leave the old namespace advertised even though its
+        # URL handler no longer exists. LAUNCH then reuses a dead document. Start
+        # a fresh session whenever replacing a previous DashCast payload.
+        if self.cast.app_id == controller.supporting_app_id:
             self.cast.quit_app(timeout=self.config.connect_timeout)
         response = WaitResponse(self.config.connect_timeout, "TV Payload web viewer")
         controller.launch(callback_function=response.callback)

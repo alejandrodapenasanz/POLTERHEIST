@@ -8,11 +8,25 @@ Inventory and assessment for networks you own or are authorized to test: **LAN r
 [2] WIRELESS RECON
 [3] CAPTIVE PORTAL
 [4] IoT SCANNING — Discovery & Control
+[h] CHECK HARDWARE AGAIN
 
 [q] EXIT
 ```
 
 Start the application with **`POLTERHEIST.py`** (uppercase on Linux). It automatically uses the Linux virtual environment prepared by `setup.sh`. The application workflows live in **`script.py`**, organized into functions. The independent **`tv_control/`** package provides media discovery and playback. The external detector remains in `vendor/` to preserve its original code, license, and provenance.
+
+Startup performs local hardware/dependency checks before opening a workflow. Unavailable
+menu options appear in **red**, with a reason; unknown capabilities appear in amber.
+Plain terminals and `NO_COLOR=1` retain the text labels. Press **h** to check again after
+connecting an adapter or fixing dependencies. The check does not scan networks or change
+radio settings. Preview and diagnostic routes remain accessible inside partially supported menus.
+
+Persistent JSON logs are saved in `reports/logs/polterheist-<PID>.jsonl`. They include UTC
+timestamps, session IDs, modules, workflow results, hardware checks and exception traces.
+Files rotate at 5 MB with three backups per process; startup retains the 20 most recent
+existing log files. `POLTERHEIST_LOG_DIR` overrides the location; if the project is not writable,
+logs fall back to `~/.local/state/polterheist/logs/`. Known payload credentials and common
+secret fields are redacted. IoT/media modules share this logger.
 
 ## Animated main menu
 
@@ -44,6 +58,12 @@ python3 POLTERHEIST.py
 `setup.sh` installs the required APT tools (including Python/venv, NetworkManager, BlueZ and FFmpeg), creates or reuses a Linux virtual environment, installs **all of `requirements.txt`** with that environment's Python, and checks dependency compatibility. In a terminal it then opens a **Bash session inside the repository with the venv already activated**: the prompt shows the environment name, and `python`, `python3` and `pip` use that environment. You can immediately run `python3 POLTERHEIST.py`. The installer works from another directory and preserves Windows environments. Installation requires Internet access and APT may request your sudo password.
 
 Both `bash setup.sh` and `sudo bash setup.sh` support this flow. With sudo, the venv and prepared session run as the original user. Because an executed script cannot change its parent shell, activation lives in the new Bash session; `exit` returns to your previous shell, and `deactivate` disables the venv in the prepared session. This session loads the venv activation script as its Bash startup file. In a later terminal, `python3 POLTERHEIST.py` still selects the installed environment automatically, or you can use the `source .../bin/activate` command printed by non-interactive setup.
+
+System installation starts with `sudo apt-get update` (directly as root when applicable)
+and stops if any repository cannot update. Before Python installation, setup repairs
+root-owned leftovers in the selected Linux venv and project `reports/`, `.cache/` and
+`config/` directories. It preserves other users' ownership, source files, Windows venvs
+and symlink targets. `--skip-system` and `--run-only` retain their explicit no-APT behavior.
 
 ```bash
 bash setup.sh --skip-system          # Only Python dependencies; system tools already installed

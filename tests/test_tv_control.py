@@ -796,6 +796,28 @@ class ProtocolTests(QuietTest):
         self.assertEqual(payload["items"][0]["media"]["contentId"], "http://owned")
         self.assertEqual(backend.get_status().state, "PLAYING")
 
+    def test_cast_waits_for_receiver_launch_before_sending_queue(self):
+        backend = google_cast.GoogleCast(endpoint(), NETWORK, CONFIG)
+        backend.cast = Mock(app_id=None)
+        controller = backend.cast.media_controller
+        controller.is_active = False
+        calls = []
+
+        def launch(*, callback_function):
+            calls.append("launch")
+            controller.is_active = True
+            callback_function(True, {"type": "RECEIVER_STATUS"})
+
+        def send(*args, callback_function, **kwargs):
+            calls.append("queue")
+            self.assertTrue(controller.is_active)
+            callback_function(True, {"type": "MEDIA_STATUS"})
+
+        controller.launch.side_effect = launch
+        controller.send_message.side_effect = send
+        backend.play("http://owned", media.Media(Path("video.mp4"), "video/mp4", False))
+        self.assertEqual(calls, ["launch", "queue"])
+
     def test_cast_busy_unsupported_pause_and_external_stop_guard(self):
         backend = google_cast.GoogleCast(endpoint(), NETWORK, CONFIG)
         cast = Mock(app_id="OTHER_APP")

@@ -6,19 +6,22 @@ import uuid
 import zipfile
 from pathlib import Path
 
+from . import payload_schedule
 from .payload_content import content_info, prepare_content
 
 
-def prepare(root, source):
+def prepare(root, source, schedule=None):
     folder = Path(root).resolve() / ".cache/tv_control/payloads" / uuid.uuid4().hex
     folder.mkdir(parents=True)
     content = prepare_content(root, source, folder)
+    payload_schedule.save(folder, schedule)
     write_html(folder, embedded=(folder / content["file"]).stat().st_size <= 16 * 1024 * 1024)
     return folder
 
 
 def write_html(folder, receipt_url="", embedded=True, output_folder=None):
     content = content_info(folder)
+    schedule = payload_schedule.load(folder)
     source = folder / content["file"]
     if embedded and source.stat().st_size > 16 * 1024 * 1024:
         raise ValueError("Browser payload exceeds 16 MiB; a native TV package is required")
@@ -26,6 +29,8 @@ def write_html(folder, receipt_url="", embedded=True, output_folder=None):
     video = content["kind"] == "video"
     if video:
         element = '<video id="picture" autoplay loop muted playsinline preload="auto"></video>'
+        if schedule:
+            element = '<video id="picture" muted playsinline preload="auto" style="visibility:hidden"></video>'
         if embedded:
             initialize = (
                 """var raw=atob("""
@@ -41,6 +46,11 @@ p.src=URL.createObjectURL(window.payloadBlob);"""
             "p.onplaying=ready;var play=p.play();if(play&&play.catch)play.catch(function(){});"
         )
         check = "p.readyState<2||p.paused"
+        if schedule:
+            initialize = (
+                initialize.split("p.onplaying=ready;")[0] + "p.onloadeddata=ready;p.load();"
+            )
+            check = "p.readyState<2"
     else:
         element = (
             '<img id="picture" alt="TV Payload" src="'
@@ -49,6 +59,8 @@ p.src=URL.createObjectURL(window.payloadBlob);"""
         )
         initialize = "p.onload=ready;if(p.complete)ready();"
         check = "!p.naturalWidth"
+        if schedule:
+            element = element.replace("<img ", '<img style="visibility:hidden" ')
     # No fonts, scripts or image assets are fetched from third parties. ES5 supports older TVs.
     html = (
         """<!doctype html><html><head><meta charset="utf-8">
@@ -61,12 +73,19 @@ img,video{position:absolute;top:0;bottom:0;left:0;right:0;margin:auto;max-width:
 <script>(function(){var p=document.getElementById('picture'),sent=false;
 function ready(){if(sent||"""
         + check
-        + """)return;sent=true;
+        + """)return;sent=true;"""
+        + (
+            "installSchedule(p," + json.dumps(schedule) + "," + str(video).lower() + ");"
+            if schedule
+            else ""
+        )
+        + """
 setTimeout(function(){var receipt="""
         + json.dumps(receipt_url)
         + """;
 if(receipt){window.payloadReceipt=new Image();window.payloadReceipt.src=receipt;}},100);}
 """
+        + (payload_schedule.JAVASCRIPT if schedule else "")
         + initialize
         + """})();</script></body></html>"""
     )
@@ -164,6 +183,11 @@ end sub
             )
     else:
         raise ValueError("Unknown native package platform")
+    schedule = payload_schedule.load(folder)
+    if platform == "roku" and schedule:
+        (destination / "components/PayloadScene.xml").write_text(
+            payload_schedule.roku_scene(schedule, content["kind"] == "video"), encoding="utf-8"
+        )
     archive = folder / ("TV-Payload-" + platform + ".zip")
     with zipfile.ZipFile(archive, "w", zipfile.ZIP_DEFLATED) as output:
         for path in sorted(destination.rglob("*")):

@@ -2,8 +2,8 @@
 
 TV Payload prepares and transfers a complete image/video viewer, then closes the PC's
 HTTP server and control connection. The television renders its own copy of the content.
-Selecting the menu option runs both steps without asking for an IP, strategy or sending
-confirmation:
+Selecting the menu option first offers immediate or scheduled playback, then runs both
+steps without asking for an IP, strategy or sending confirmation:
 
 1. **Detect:** identify the target's advertised protocols, model and available transports.
 2. **Send and execute:** select an eligible offline runtime, build its viewer, upload,
@@ -42,6 +42,38 @@ selection, or **TV playback controls → TV Payload (8)**. Direct entry skips th
 Linux uses the environment's Python with the same arguments. `--image` remains an alias
 for `--media`. `--yes` is optional and has no effect; there is no sending prompt.
 `--duration` is accepted for compatibility, but the PC always disconnects after transfer.
+
+## Scheduled playback
+
+The interactive menu offers **Now**, **Start at a time**, and **Every X minutes**.
+For direct use without a scheduling prompt:
+
+```bash
+python3 POLTERHEIST.py --tv-payload --at 20:30
+python3 POLTERHEIST.py --tv-payload --every 5 --show-seconds 10
+python3 -m tv_control.payload --media media/video.mp4 --at 20:30 --every 15
+python3 -m tv_control.payload --prepare-only --at '2026-11-20T20:30:00+01:00'
+```
+
+`HH:MM` selects the next occurrence in the PC's local timezone; an ISO date/time can
+include an explicit UTC offset. The schedule is transferred as a UTC timestamp, so the
+TV and PC clocks must be correct. A past explicit date is rejected. Without `--at`, the
+first repeat occurs after X minutes; `--at` and `--every` can be combined in the CLI.
+The standalone module without scheduling flags retains immediate continuous playback.
+
+A single scheduled start displays the image continuously or loops the video. Repeating
+schedules show each image for `--show-seconds` (default 10), or play the video once, then
+wait on a black screen. A video/image is not interrupted when it outlasts its interval;
+missed occurrences are skipped. The viewer displays the next execution while waiting.
+If transfer finishes after the requested start, it begins when the media is ready.
+
+Schedules run **on the TV**, including HTML, webOS/Tizen, Roku and Android packages;
+the PC disconnects once media loading is confirmed, even if playback is hours away.
+Keep the viewer in the foreground. This does not wake a sleeping TV, open the viewer
+after reboot, or overlay other TV applications. **Back/Escape on the TV, or closing the
+viewer, cancels the current scheduled session**. Reopening an installed package loads its
+packaged schedule again. Transfer reports contain the schedule; they do not claim that
+a future playback has already been observed.
 
 The workspace's ignored `config/tv_payload.json` selects `192.168.1.159` and
 `media/image.jpg`. Other installations can copy `config/tv_payload.example.json`:
@@ -130,7 +162,8 @@ Reports live in `reports/tv_payload/`; generated viewers/source archives in
 `.cache/tv_control/payloads/`; signed Android APKs in `.cache/tv_control/android/`.
 
 * `HTML_EXECUTION_CONFIRMED`: the selected TV fetched the HTML and its JavaScript sent a
-  receipt after decoding the image or starting the fully embedded video.
+  receipt after decoding the image or loading the fully embedded video. Scheduled
+  playback acknowledges loading before its start time.
 * Native states record installation/launch acknowledgements and available foreground or
   active-app checks. These are distinct from a photograph or user confirmation.
 * `requires_host: false` and `host_session: CLOSED_AFTER_TRANSFER` indicate successful
@@ -148,11 +181,22 @@ confirmed seeing `image.jpg`. Evidence:
 `reports/tv_payload/session_20261117T183952727684Z.json` and
 `reports/tv_payload/post_disconnect.json`.
 
-Tests cover protocol/SDK fixtures, no-prompt entry points, exclusion of streaming,
+Tests cover protocol/SDK fixtures, CLI entry points, exclusion of streaming,
 fallbacks, local HTTP receipt checks, real Android compilation/signing and Chromium
 image/video execution. The real browser tests close HTTP, disable browser networking and
-verify that the video continues through a complete loop. Samsung/LG/Roku hardware and
-physical video playback have not been tested here.
+verify that the video continues through a complete loop. Samsung/LG/Roku hardware
+and native APK execution on a TV have not been tested here.
+
+On **2026-11-19**, the same Xiaomi MiTV-MSSP2 passed live Cast HTML checks for a timed
+image start, two image repetitions and two complete video repetitions, plus cancellation,
+after the content HTTP server had closed. A separate test-only collector received viewer
+events and decoded-frame counts. The user also confirmed seeing the image and moving
+colour video. A final uninstrumented PayloadTV image transfer succeeded. Cast media
+playback, pause, resume, repeat and stop passed with the normal configuration.
+
+These checks exposed and fixed stale DashCast sessions between payloads and an ordinary
+request timeout incorrectly covering a cold Cast media receiver launch. Evidence and
+remaining platform limits: [TV/Windows validation](VALIDATION_2026-11-19.md).
 
 ```powershell
 .\.venv\Scripts\python.exe -m unittest discover -s tests -p 'test_tv*.py'

@@ -6,6 +6,7 @@ import android.graphics.BitmapFactory;
 import android.graphics.Color;
 import android.media.MediaPlayer;
 import android.os.Bundle;
+import android.os.Handler;
 import android.view.Gravity;
 import android.view.View;
 import android.view.WindowManager;
@@ -23,11 +24,68 @@ import org.json.JSONObject;
 public final class ImageActivity extends Activity {
     private Bitmap image;
     private VideoView video;
+    private View curtain;
+    private TextView scheduleStatus;
+    private final Handler timer = new Handler();
+    private long next = 0, interval = 0, imageMillis = 10000, hideAt = 0;
+    private boolean scheduled = false, active = false, fired = false, ready = false;
+    private final Runnable clock = new Runnable() {
+        @Override public void run() {
+            long now = System.currentTimeMillis();
+            if (ready) {
+                if (active && video == null && interval > 0 && now >= hideAt) hide();
+                if (!active && (!fired || interval > 0) && now >= next) {
+                    active = true; fired = true; hideAt = now + imageMillis;
+                    curtain.setVisibility(View.GONE);
+                    if (interval > 0) next += ((now - next) / interval + 1) * interval;
+                    if (video != null) { video.seekTo(0); video.start(); }
+                }
+                if (active && interval > 0 && now >= next) next += ((now - next) / interval + 1) * interval;
+                scheduleStatus.setText(active ? "" : "Next: " + new java.util.Date(next) + " | Back: cancel");
+            }
+            timer.postDelayed(this, 250);
+        }
+    };
+
+    private void hide() {
+        active = false;
+        if (curtain != null) curtain.setVisibility(View.VISIBLE);
+        if (video != null) video.pause();
+    }
+
+    private void attach(View view) {
+        FrameLayout frame = new FrameLayout(this);
+        frame.setBackgroundColor(Color.BLACK);
+        frame.addView(view, new FrameLayout.LayoutParams(-1, -1, Gravity.CENTER));
+        // Keep VideoView's surface alive so it can prepare while waiting. Hiding
+        // the SurfaceView itself would prevent onPrepared on some Android TVs.
+        curtain = new View(this);
+        curtain.setBackgroundColor(Color.BLACK);
+        curtain.setVisibility(scheduled ? View.VISIBLE : View.GONE);
+        frame.addView(curtain, new FrameLayout.LayoutParams(-1, -1));
+        scheduleStatus = new TextView(this);
+        scheduleStatus.setTextColor(Color.LTGRAY);
+        frame.addView(scheduleStatus, new FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM));
+        setContentView(frame);
+    }
 
     @Override
     public void onCreate(Bundle state) {
         super.onCreate(state);
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+        try (InputStream input = getAssets().open("schedule.json")) {
+            ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+            byte[] chunk = new byte[1024];
+            int size;
+            while ((size = input.read(chunk)) != -1) bytes.write(chunk, 0, size);
+            JSONObject schedule = new JSONObject(bytes.toString("UTF-8"));
+            next = schedule.getLong("start_at");
+            interval = schedule.getLong("every_ms");
+            imageMillis = schedule.getLong("image_ms");
+            scheduled = true;
+        } catch (java.io.FileNotFoundException absent) {
+            // Older/immediate packages have no schedule.
+        } catch (Exception error) { showError(); return; }
         try (InputStream metadata = getAssets().open("content.json")) {
             ByteArrayOutputStream buffer = new ByteArrayOutputStream();
             byte[] bytes = new byte[1024];
@@ -54,7 +112,8 @@ public final class ImageActivity extends Activity {
             view.setScaleType(ImageView.ScaleType.FIT_CENTER);
             view.setContentDescription("TV Payload image");
             view.setImageBitmap(image);
-            setContentView(view);
+            attach(view);
+            ready = true;
         } catch (Exception error) {
             showError();
         }
@@ -70,16 +129,18 @@ public final class ImageActivity extends Activity {
                 output.write(chunk, 0, count);
             }
         }
-        FrameLayout frame = new FrameLayout(this);
-        frame.setBackgroundColor(Color.BLACK);
         video = new VideoView(this);
-        frame.addView(video, new FrameLayout.LayoutParams(
-            FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT, Gravity.CENTER));
-        setContentView(frame);
+        attach(video);
         video.setOnPreparedListener(new MediaPlayer.OnPreparedListener() {
             @Override public void onPrepared(MediaPlayer player) {
-                player.setLooping(true);
-                video.start();
+                player.setLooping(!scheduled || interval == 0);
+                ready = true;
+                if (!scheduled) video.start();
+            }
+        });
+        video.setOnCompletionListener(new MediaPlayer.OnCompletionListener() {
+            @Override public void onCompletion(MediaPlayer player) {
+                if (scheduled && interval > 0) hide();
             }
         });
         video.setOnErrorListener(new MediaPlayer.OnErrorListener() {
@@ -103,6 +164,7 @@ public final class ImageActivity extends Activity {
 
     @Override
     protected void onPause() {
+        timer.removeCallbacks(clock);
         if (video != null) video.pause();
         super.onPause();
     }
@@ -110,11 +172,13 @@ public final class ImageActivity extends Activity {
     @Override
     protected void onResume() {
         super.onResume();
-        if (video != null) video.start();
+        if (scheduled) { timer.removeCallbacks(clock); timer.post(clock); }
+        if (video != null && (!scheduled || active)) video.start();
     }
 
     @Override
     protected void onDestroy() {
+        timer.removeCallbacks(clock);
         if (video != null) video.stopPlayback();
         super.onDestroy();
     }

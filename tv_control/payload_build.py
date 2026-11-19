@@ -118,7 +118,7 @@ def validate_image(root, source):
     return path
 
 
-def build_apk(root, source):
+def build_apk(root, source, schedule=None):
     from .payload_content import prepare_content, validate_source
 
     root = Path(root).resolve()
@@ -160,6 +160,10 @@ def build_apk(root, source):
         for folder in (assets, classes, dex):
             folder.mkdir()
         prepare_content(root, source, assets)
+        if schedule:
+            from .payload_schedule import save
+
+            save(assets, schedule)
         resources, unsigned, aligned = (
             work / name for name in ("resources.zip", "unsigned.apk", "aligned.apk")
         )

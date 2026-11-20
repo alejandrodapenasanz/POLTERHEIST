@@ -17,7 +17,7 @@ import script
 class LauncherTests(unittest.TestCase):
     def setUp(self):
         self.project = (
-            Path(self.enterContext(tempfile.TemporaryDirectory())) / "project with spaces"
+            Path(self.enterContext(tempfile.TemporaryDirectory())).resolve() / "project with spaces"
         )
         self.project.mkdir()
         self.entry = self.project / "POLTERHEIST.py"

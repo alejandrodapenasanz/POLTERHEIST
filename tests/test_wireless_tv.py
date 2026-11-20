@@ -15,6 +15,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
+from app_logging import close_logging
 from tv_control import cli, p2p, wireless_cli
 from tv_control.discovery import Discovery
 from tv_control.discovery_backends import DiscoveryBackend
@@ -88,7 +89,7 @@ class QuietTest(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
-        self.root = Path(self.temp.name)
+        self.root = Path(self.temp.name).resolve()
         self.output = self.enterContext(contextlib.redirect_stdout(io.StringIO()))
         self.enterContext(contextlib.redirect_stderr(io.StringIO()))
         self.enterContext(patch.object(logging.getLogger("tv_control.wireless"), "exception"))
@@ -737,6 +738,7 @@ class InventoryTests(QuietTest):
 
 class IntegrationTests(QuietTest):
     def test_application_opens_without_lan_and_closes_safely(self):
+        self.addCleanup(close_logging)
         with patch.object(cli, "detect_network", side_effect=RuntimeError("SIMULATED no LAN")):
             app = cli.Application(self.root)
         self.addCleanup(app.close)

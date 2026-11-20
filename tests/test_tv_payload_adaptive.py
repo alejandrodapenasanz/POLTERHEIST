@@ -38,7 +38,7 @@ def endpoint(protocol="Google Cast", **kwargs):
 
 class AdaptiveTests(unittest.TestCase):
     def setUp(self):
-        self.root = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        self.root = Path(self.enterContext(tempfile.TemporaryDirectory())).resolve()
         (self.root / "media").mkdir()
         self.source = self.root / "media/image.jpg"
         Image.new("RGB", (160, 90), "blue").save(self.source)
